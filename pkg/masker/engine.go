@@ -25,8 +25,21 @@ func NewRuleEngine(cfg *config.MaskingConfig) (*RuleEngine, error) {
 		rules: make([]CompiledRule, 0),
 	}
 
+	builtinRules := cfg.BuiltinRules
+	if len(builtinRules) == 0 {
+		builtinRules = []string{
+			string(RuleEmail),
+			string(RuleCreditCard),
+			string(RuleSSN),
+			string(RuleAPIKey),
+			string(RuleJWT),
+			string(RulePhone),
+			string(RuleIPAddress),
+		}
+	}
+
 	// Register built-in rules
-	for _, ruleName := range cfg.BuiltinRules {
+	for _, ruleName := range builtinRules {
 		switch strings.ToLower(ruleName) {
 		case string(RuleEmail):
 			engine.rules = append(engine.rules, CompiledRule{
