@@ -35,9 +35,9 @@ MEMORY.local.md
 *.key
 *.cert
 *.crt
-secrets/
-credentials/
-local_keys/
+/secrets/
+/credentials/
+/local_keys/
 
 # IDE and OS specific files
 .DS_Store
