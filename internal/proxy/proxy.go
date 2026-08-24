@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/krypton-mcp/krypton/internal/config"
+	"github.com/krypton-mcp/krypton/pkg/guardrails"
 	"github.com/krypton-mcp/krypton/pkg/masker"
 	"github.com/krypton-mcp/krypton/pkg/mcp"
 )
@@ -35,7 +36,9 @@ type GatewayProxy struct {
 	reqInterceptors  []RequestInterceptor
 	respInterceptors []ResponseInterceptor
 
-	tokenizer *masker.Tokenizer
+	tokenizer         *masker.Tokenizer
+	injectionDetector *guardrails.InjectionDetector
+	policyEngine      *guardrails.PolicyEngine
 
 	mu     sync.Mutex
 	closed bool
@@ -92,7 +95,19 @@ func (p *GatewayProxy) initSecurityPipelines() {
 		return
 	}
 
-	// Initialize In-Flight Masking Interceptors
+	// 1. Initialize Guardrails Interceptor (Injection defense + RBAC + Size limits)
+	if p.cfg.Security.GuardrailsEnabled {
+		p.injectionDetector = guardrails.NewInjectionDetector()
+		p.policyEngine, _ = guardrails.NewPolicyEngine(nil)
+
+		p.AddRequestInterceptor(guardrails.GuardrailRequestInterceptor(
+			p.injectionDetector,
+			p.policyEngine,
+			p.cfg.Guardrails.MaxPromptSizeBytes,
+		))
+	}
+
+	// 2. Initialize In-Flight Masking Interceptors (Inbound unmasking + Outbound masking)
 	if p.cfg.Security.MaskingEnabled {
 		tok, err := masker.NewTokenizer(&p.cfg.Masking, nil)
 		if err == nil {
@@ -110,6 +125,13 @@ func (p *GatewayProxy) AttachMasker(tok *masker.Tokenizer) {
 	p.tokenizer = tok
 	p.reqInterceptors = append(p.reqInterceptors, masker.DetokenizingRequestInterceptor(tok))
 	p.respInterceptors = append(p.respInterceptors, masker.MaskingResponseInterceptor(tok))
+}
+
+// AttachPolicyEngine sets the policy engine
+func (p *GatewayProxy) AttachPolicyEngine(pe *guardrails.PolicyEngine) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.policyEngine = pe
 }
 
 // Tokenizer returns the active tokenizer instance
@@ -198,7 +220,7 @@ func (p *GatewayProxy) forwardClientToDownstream(ctx context.Context) error {
 			continue
 		}
 
-		// Apply request interceptors
+		// Apply request interceptors in order
 		p.mu.Lock()
 		interceptors := make([]RequestInterceptor, len(p.reqInterceptors))
 		copy(interceptors, p.reqInterceptors)
