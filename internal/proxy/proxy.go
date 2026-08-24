@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/krypton-mcp/krypton/internal/config"
+	"github.com/krypton-mcp/krypton/pkg/masker"
 	"github.com/krypton-mcp/krypton/pkg/mcp"
 )
 
@@ -34,6 +35,8 @@ type GatewayProxy struct {
 	reqInterceptors  []RequestInterceptor
 	respInterceptors []ResponseInterceptor
 
+	tokenizer *masker.Tokenizer
+
 	mu     sync.Mutex
 	closed bool
 }
@@ -48,7 +51,7 @@ type GatewayStreams struct {
 
 // NewGatewayProxy creates a GatewayProxy instance with explicit streams (useful for testing and stdio)
 func NewGatewayProxy(cfg *config.Config, streams GatewayStreams) *GatewayProxy {
-	return &GatewayProxy{
+	proxy := &GatewayProxy{
 		cfg:              cfg,
 		clientReader:     mcp.NewFramingReader(streams.ClientIn),
 		clientWriter:     mcp.NewFramingWriter(streams.ClientOut),
@@ -57,6 +60,9 @@ func NewGatewayProxy(cfg *config.Config, streams GatewayStreams) *GatewayProxy {
 		reqInterceptors:  make([]RequestInterceptor, 0),
 		respInterceptors: make([]ResponseInterceptor, 0),
 	}
+
+	proxy.initSecurityPipelines()
+	return proxy
 }
 
 // NewSubprocessGatewayProxy creates a GatewayProxy that spawns and manages a downstream process
@@ -68,7 +74,7 @@ func NewSubprocessGatewayProxy(cfg *config.Config, clientIn io.Reader, clientOut
 		cfg.Downstream.WorkingDir,
 	)
 
-	return &GatewayProxy{
+	proxy := &GatewayProxy{
 		cfg:              cfg,
 		supervisor:       sup,
 		clientReader:     mcp.NewFramingReader(clientIn),
@@ -76,6 +82,41 @@ func NewSubprocessGatewayProxy(cfg *config.Config, clientIn io.Reader, clientOut
 		reqInterceptors:  make([]RequestInterceptor, 0),
 		respInterceptors: make([]ResponseInterceptor, 0),
 	}
+
+	proxy.initSecurityPipelines()
+	return proxy
+}
+
+func (p *GatewayProxy) initSecurityPipelines() {
+	if p.cfg == nil {
+		return
+	}
+
+	// Initialize In-Flight Masking Interceptors
+	if p.cfg.Security.MaskingEnabled {
+		tok, err := masker.NewTokenizer(&p.cfg.Masking, nil)
+		if err == nil {
+			p.tokenizer = tok
+			p.AddRequestInterceptor(masker.DetokenizingRequestInterceptor(tok))
+			p.AddResponseInterceptor(masker.MaskingResponseInterceptor(tok))
+		}
+	}
+}
+
+// AttachMasker manually sets a tokenizer and registers its interceptors
+func (p *GatewayProxy) AttachMasker(tok *masker.Tokenizer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tokenizer = tok
+	p.reqInterceptors = append(p.reqInterceptors, masker.DetokenizingRequestInterceptor(tok))
+	p.respInterceptors = append(p.respInterceptors, masker.MaskingResponseInterceptor(tok))
+}
+
+// Tokenizer returns the active tokenizer instance
+func (p *GatewayProxy) Tokenizer() *masker.Tokenizer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tokenizer
 }
 
 // AddRequestInterceptor registers an interceptor for incoming client requests
@@ -169,7 +210,6 @@ func (p *GatewayProxy) forwardClientToDownstream(ctx context.Context) error {
 		for _, interceptor := range interceptors {
 			resp, shouldIntercept, err := interceptor(ctx, raw)
 			if err != nil {
-				// Interceptor generated error
 				if raw.ID != nil {
 					errResp := mcp.NewErrorResponse(*raw.ID, mcp.NewInternalError(err.Error()))
 					_ = p.clientWriter.WriteMessage(errResp)
@@ -194,12 +234,11 @@ func (p *GatewayProxy) forwardClientToDownstream(ctx context.Context) error {
 		}
 
 		// Forward to downstream
-		// If raw was modified in place by interceptors, re-marshal; otherwise use fast rawBytes
 		if err := p.downstreamWriter.WriteMessage(raw); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				return err
 			}
-			_ = rawBytes // keep reference
+			_ = rawBytes
 			return fmt.Errorf("failed to forward message to downstream: %w", err)
 		}
 	}
@@ -231,7 +270,6 @@ func (p *GatewayProxy) forwardDownstreamToClient(ctx context.Context) error {
 		for _, interceptor := range interceptors {
 			mod, err := interceptor(ctx, currentMsg)
 			if err != nil {
-				// If interceptor fails, log and continue with unmodified message
 				break
 			}
 			if mod != nil {
