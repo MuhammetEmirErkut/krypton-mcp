@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/krypton-mcp/krypton/internal/config"
+	"github.com/krypton-mcp/krypton/pkg/audit"
 	"github.com/krypton-mcp/krypton/pkg/guardrails"
 	"github.com/krypton-mcp/krypton/pkg/masker"
 	"github.com/krypton-mcp/krypton/pkg/mcp"
@@ -39,6 +40,7 @@ type GatewayProxy struct {
 	tokenizer         *masker.Tokenizer
 	injectionDetector *guardrails.InjectionDetector
 	policyEngine      *guardrails.PolicyEngine
+	auditWriter       *audit.LogWriter
 
 	mu     sync.Mutex
 	closed bool
@@ -95,7 +97,30 @@ func (p *GatewayProxy) initSecurityPipelines() {
 		return
 	}
 
-	// 1. Initialize Guardrails Interceptor (Injection defense + RBAC + Size limits)
+	// 1. Initialize Audit Logging & Merkle Ledger
+	if p.cfg.Security.AuditEnabled && p.cfg.Audit.LogPath != "" {
+		writer, err := audit.NewFileWriter(p.cfg.Audit.LogPath)
+		if err == nil {
+			p.auditWriter = writer
+			p.AddRequestInterceptor(func(ctx context.Context, raw *mcp.RawMessage) (*mcp.Response, bool, error) {
+				evtType := audit.EventMCPRequest
+				if raw.Method == mcp.MethodToolsCall {
+					evtType = audit.EventToolExecution
+				}
+				evt := audit.NewAuditEvent(evtType, "client", raw.Method, raw.Params, nil)
+				_ = writer.WriteEvent(evt)
+				return nil, false, nil
+			})
+
+			p.AddResponseInterceptor(func(ctx context.Context, raw *mcp.RawMessage) (*mcp.RawMessage, error) {
+				evt := audit.NewAuditEvent(audit.EventMCPResponse, "downstream", "", raw.Result, nil)
+				_ = writer.WriteEvent(evt)
+				return raw, nil
+			})
+		}
+	}
+
+	// 2. Initialize Guardrails Interceptor (Injection defense + RBAC + Size limits)
 	if p.cfg.Security.GuardrailsEnabled {
 		p.injectionDetector = guardrails.NewInjectionDetector()
 		p.policyEngine, _ = guardrails.NewPolicyEngine(nil)
@@ -107,7 +132,7 @@ func (p *GatewayProxy) initSecurityPipelines() {
 		))
 	}
 
-	// 2. Initialize In-Flight Masking Interceptors (Inbound unmasking + Outbound masking)
+	// 3. Initialize In-Flight Masking Interceptors (Inbound unmasking + Outbound masking)
 	if p.cfg.Security.MaskingEnabled {
 		tok, err := masker.NewTokenizer(&p.cfg.Masking, nil)
 		if err == nil {
@@ -132,6 +157,13 @@ func (p *GatewayProxy) AttachPolicyEngine(pe *guardrails.PolicyEngine) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.policyEngine = pe
+}
+
+// AttachAuditWriter sets the audit log writer
+func (p *GatewayProxy) AttachAuditWriter(w *audit.LogWriter) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.auditWriter = w
 }
 
 // Tokenizer returns the active tokenizer instance
@@ -176,6 +208,13 @@ func (p *GatewayProxy) Start(ctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer func() {
+		p.mu.Lock()
+		if p.auditWriter != nil {
+			_ = p.auditWriter.Close()
+		}
+		p.mu.Unlock()
+	}()
 
 	errCh := make(chan error, 2)
 
@@ -214,7 +253,6 @@ func (p *GatewayProxy) forwardClientToDownstream(ctx context.Context) error {
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				return err
 			}
-			// If JSON unmarshal failed, return JSON-RPC ParseError to client
 			parseErr := mcp.NewErrorResponse(mcp.RequestID{IsNull: true}, mcp.NewParseError(err.Error()))
 			_ = p.clientWriter.WriteMessage(parseErr)
 			continue
