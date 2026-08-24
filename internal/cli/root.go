@@ -35,6 +35,7 @@ and a cryptographically signed Merkle audit ledger.`,
 	rootCmd.AddCommand(NewVersionCmd())
 	rootCmd.AddCommand(NewConfigCmd())
 	rootCmd.AddCommand(NewStartCmd())
+	rootCmd.AddCommand(NewAuditCmd())
 
 	return rootCmd
 }
