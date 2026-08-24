@@ -123,13 +123,17 @@ func (p *GatewayProxy) initSecurityPipelines() {
 	// 2. Initialize Guardrails Interceptor (Injection defense + RBAC + Size limits)
 	if p.cfg.Security.GuardrailsEnabled {
 		p.injectionDetector = guardrails.NewInjectionDetector()
-		p.policyEngine, _ = guardrails.NewPolicyEngine(nil)
+		if p.policyEngine == nil {
+			p.policyEngine, _ = guardrails.NewPolicyEngine(nil)
+		}
 
-		p.AddRequestInterceptor(guardrails.GuardrailRequestInterceptor(
-			p.injectionDetector,
-			p.policyEngine,
-			p.cfg.Guardrails.MaxPromptSizeBytes,
-		))
+		p.AddRequestInterceptor(func(ctx context.Context, raw *mcp.RawMessage) (*mcp.Response, bool, error) {
+			p.mu.Lock()
+			detector := p.injectionDetector
+			pe := p.policyEngine
+			p.mu.Unlock()
+			return guardrails.GuardrailRequestInterceptor(detector, pe, p.cfg.Guardrails.MaxPromptSizeBytes)(ctx, raw)
+		})
 	}
 
 	// 3. Initialize In-Flight Masking Interceptors (Inbound unmasking + Outbound masking)
@@ -137,8 +141,24 @@ func (p *GatewayProxy) initSecurityPipelines() {
 		tok, err := masker.NewTokenizer(&p.cfg.Masking, nil)
 		if err == nil {
 			p.tokenizer = tok
-			p.AddRequestInterceptor(masker.DetokenizingRequestInterceptor(tok))
-			p.AddResponseInterceptor(masker.MaskingResponseInterceptor(tok))
+			p.AddRequestInterceptor(func(ctx context.Context, raw *mcp.RawMessage) (*mcp.Response, bool, error) {
+				p.mu.Lock()
+				t := p.tokenizer
+				p.mu.Unlock()
+				if t != nil {
+					return masker.DetokenizingRequestInterceptor(t)(ctx, raw)
+				}
+				return nil, false, nil
+			})
+			p.AddResponseInterceptor(func(ctx context.Context, raw *mcp.RawMessage) (*mcp.RawMessage, error) {
+				p.mu.Lock()
+				t := p.tokenizer
+				p.mu.Unlock()
+				if t != nil {
+					return masker.MaskingResponseInterceptor(t)(ctx, raw)
+				}
+				return raw, nil
+			})
 		}
 	}
 }
@@ -148,8 +168,6 @@ func (p *GatewayProxy) AttachMasker(tok *masker.Tokenizer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.tokenizer = tok
-	p.reqInterceptors = append(p.reqInterceptors, masker.DetokenizingRequestInterceptor(tok))
-	p.respInterceptors = append(p.respInterceptors, masker.MaskingResponseInterceptor(tok))
 }
 
 // AttachPolicyEngine sets the policy engine

@@ -8,6 +8,9 @@ import (
 // JSONRPCVersion is the standard JSON-RPC protocol version supported by MCP
 const JSONRPCVersion = "2.0"
 
+// ProtocolVersion is the MCP specification version supported
+const ProtocolVersion = "2024-11-05"
+
 // Standard JSON-RPC 2.0 error codes
 const (
 	CodeParseError     = -32700
