@@ -24,6 +24,10 @@ DEVELOPER.md
 DEVELOPER.local.md
 *.local.md
 
+MEMORY.md
+MEMORY.local.md
+*.local.md
+
 # Secrets, keys, and environment files
 .env
 .env.*
