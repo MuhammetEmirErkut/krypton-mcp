@@ -1,0 +1,56 @@
+# KryptonMCP - Git Ignore Rules
+
+# Binaries and build artifacts
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+krypton
+krypton-mcp
+
+# Test and coverage artifacts
+*.out
+*.test
+coverage.html
+coverage.txt
+.coverage/
+
+# Developer private checklist and local task tracker (CRITICAL: NEVER COMMIT)
+DEVELOPER.md
+DEVELOPER.local.md
+*.local.md
+
+# Secrets, keys, and environment files
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.crt
+secrets/
+credentials/
+local_keys/
+
+# IDE and OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary and log files
+*.log
+tmp/
+temp/
+audit_cache/
