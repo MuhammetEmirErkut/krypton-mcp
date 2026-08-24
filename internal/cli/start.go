@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/krypton-mcp/krypton/internal/config"
+	"github.com/krypton-mcp/krypton/internal/proxy"
 	"github.com/spf13/cobra"
 )
 
@@ -62,6 +66,14 @@ enforces guardrails, and signs audit logs.`,
 				fmt.Fprintf(cmd.OutOrStdout(), "  Guardrails Enabled: %t\n", cfg.Security.GuardrailsEnabled)
 				fmt.Fprintf(cmd.OutOrStdout(), "  Audit Enabled: %t (Log: %s)\n", cfg.Security.AuditEnabled, cfg.Audit.LogPath)
 				return nil
+			}
+
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+
+			if cfg.Downstream.Command != "" {
+				gw := proxy.NewSubprocessGatewayProxy(cfg, os.Stdin, os.Stdout)
+				return gw.Start(ctx)
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "🛡️  Starting KryptonMCP Gateway (Transport: %s)...\n", cfg.Server.Transport)
