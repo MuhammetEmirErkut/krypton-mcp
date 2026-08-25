@@ -6,7 +6,7 @@
 
 *Deterministic PII Masking • Prompt Injection Guardrails • JIT Ephemeral Credentials • Signed Merkle Audit Ledger*
 
-[![CI](https://github.com/krypton-mcp/krypton/actions/workflows/ci.yml/badge.svg)](https://github.com/krypton-mcp/krypton/actions/workflows/ci.yml)
+[![CI](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![MCP Compliant](https://img.shields.io/badge/MCP-2024--11--05-8A2BE2)](https://modelcontextprotocol.io)
@@ -15,12 +15,12 @@
 <br />
 
 ```
-    ┌────────────────┐        ┌─────────────────────────┐        ┌──────────────────────┐
-    │                │        │       KryptonMCP        │        │                      │
-    │   AI Client    │ ───►  │   Zero-Trust Gateway    │ ───►  │ Downstream Services  │
-    │ (Claude/Cursor)│ ◄───  │ (Mask / Policy / Audit) │ ◄───  │ (Postgres/Redis/API) │
-    │                │        │                         │        │                      │
-    └────────────────┘        └─────────────────────────┘        └──────────────────────┘
+┌──────────────────┐          ┌───────────────────────────┐          ┌─────────────────────────┐
+│                  │          │        KryptonMCP         │          │                         │
+│    AI Client     │  ──────► │    Zero-Trust Gateway     │  ──────► │   Downstream Services   │
+│ (Claude, Cursor) │  ◄────── │  (Mask / Policy / Audit)  │  ◄────── │  (Postgres, Redis, API) │
+│                  │          │                           │          │                         │
+└──────────────────┘          └───────────────────────────┘          └─────────────────────────┘
 ```
 
 </div>
