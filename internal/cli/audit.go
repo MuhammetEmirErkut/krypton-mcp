@@ -26,7 +26,11 @@ func NewAuditCmd() *cobra.Command {
 }
 
 func newAuditKeygenCmd() *cobra.Command {
-	var outDir string
+	var (
+		outDir   string
+		privPath string
+		pubPath  string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "keygen",
@@ -37,8 +41,12 @@ func newAuditKeygenCmd() *cobra.Command {
 				return fmt.Errorf("failed to generate keypair: %w", err)
 			}
 
-			privPath := filepath.Join(outDir, "krypton_audit.key")
-			pubPath := filepath.Join(outDir, "krypton_audit.pub")
+			if privPath == "" {
+				privPath = filepath.Join(outDir, "krypton_audit.key")
+			}
+			if pubPath == "" {
+				pubPath = filepath.Join(outDir, "krypton_audit.pub")
+			}
 
 			if err := audit.SaveKeyPair(kp, privPath, pubPath); err != nil {
 				return fmt.Errorf("failed to save keypair: %w", err)
@@ -53,6 +61,8 @@ func newAuditKeygenCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&outDir, "out-dir", "o", ".", "Directory to output keys into")
+	cmd.Flags().StringVarP(&privPath, "priv-key", "k", "", "Path for private key output")
+	cmd.Flags().StringVarP(&pubPath, "pub-key", "p", "", "Path for public key output")
 	return cmd
 }
 
