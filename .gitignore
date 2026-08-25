@@ -54,8 +54,13 @@ Thumbs.db
 *.swo
 *~
 
-# Temporary and log files
+# Temporary, audit, and demo configuration files
 *.log
+*.jsonl
+demo-*.yaml
+demo-*.yml
+*.local.yaml
+*.local.yml
 tmp/
 temp/
 audit_cache/
