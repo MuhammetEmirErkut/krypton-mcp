@@ -95,12 +95,12 @@ graph TD
 
 ```bash
 # Build standalone binary from source (Zero dependencies, pure Go)
-git clone https://github.com/krypton-mcp/krypton.git
-cd krypton
-go build -o bin/krypton ./cmd/krypton
+git clone https://github.com/MuhammetEmirErkut/krypton-mcp.git
+cd krypton-mcp
+go build -o krypton ./cmd/krypton
 
 # Or pull the production Docker image
-docker pull ghcr.io/krypton-mcp/krypton:latest
+docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
 ```
 
 ### Initialize Configuration
