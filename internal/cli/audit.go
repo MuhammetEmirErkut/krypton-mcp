@@ -52,7 +52,7 @@ func newAuditKeygenCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&outDir, "out-dir", ".", "Directory to output keys into")
+	cmd.Flags().StringVarP(&outDir, "out-dir", "o", ".", "Directory to output keys into")
 	return cmd
 }
 

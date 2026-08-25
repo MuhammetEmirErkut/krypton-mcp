@@ -33,6 +33,7 @@ MEMORY.local.md
 .env.*
 *.pem
 *.key
+*.pub
 *.cert
 *.crt
 /secrets/
