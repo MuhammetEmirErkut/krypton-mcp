@@ -73,11 +73,21 @@ func newAuditVerifyCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "verify",
+		Use:   "verify [log-file]",
 		Short: "Cryptographically verify the integrity of an audit log file",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				logFile = args[0]
+			} else if logFile == "audit.jsonl" {
+				if _, err := os.Stat("audit.jsonl"); os.IsNotExist(err) {
+					if _, err := os.Stat("krypton-audit.log"); err == nil {
+						logFile = "krypton-audit.log"
+					}
+				}
+			}
+
 			if logFile == "" {
-				return fmt.Errorf("--log-file is required")
+				return fmt.Errorf("log file is required (pass as argument or via -f/--log-file)")
 			}
 
 			var pub ed25519PublicKeyWrapper
@@ -96,7 +106,7 @@ func newAuditVerifyCmd() *cobra.Command {
 
 			if report.Valid {
 				fmt.Printf("✅ Audit ledger verification PASSED\n")
-				fmt.Printf("   Total Events:   %d\n", report.TotalEvents)
+				fmt.Printf("   Total Events:      %d\n", report.TotalEvents)
 				fmt.Printf("   Final Merkle Root: %s\n", report.ComputedRoot)
 				return nil
 			}
@@ -121,11 +131,21 @@ func newAuditProofCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "proof",
+		Use:   "proof [log-file]",
 		Short: "Export a cryptographic inclusion proof for a specific audit log index",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				logFile = args[0]
+			} else if logFile == "audit.jsonl" {
+				if _, err := os.Stat("audit.jsonl"); os.IsNotExist(err) {
+					if _, err := os.Stat("krypton-audit.log"); err == nil {
+						logFile = "krypton-audit.log"
+					}
+				}
+			}
+
 			if logFile == "" {
-				return fmt.Errorf("--log-file is required")
+				return fmt.Errorf("log file is required (pass as argument or via -f/--log-file)")
 			}
 
 			proof, err := audit.ExportProofFromLog(logFile, index)

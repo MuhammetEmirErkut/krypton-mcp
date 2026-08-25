@@ -128,4 +128,85 @@ func BindCredentialTools(dispatcher *mcp.Dispatcher, broker *Broker) {
 			},
 		})
 	})
+
+	// 4. Standard MCP: tools/list
+	dispatcher.RegisterRequestHandler(mcp.MethodToolsList, func(ctx context.Context, req *mcp.Request) (*mcp.Response, error) {
+		return mcp.NewSuccessResponse(req.ID, mcp.ListToolsResult{
+			Tools: []mcp.Tool{
+				{
+					Name:        ToolRequestCredential,
+					Description: "Issue dynamic JIT credentials for a database or API with automated TTL expiration",
+					InputSchema: mcp.ToolInputSchema{
+						Type: "object",
+						Properties: map[string]any{
+							"target": map[string]any{
+								"type":        "string",
+								"description": "Target service or resource name (e.g. 'postgres', 'redis')",
+							},
+							"ttl_seconds": map[string]any{
+								"type":        "integer",
+								"description": "Lease duration in seconds (default 900 = 15 minutes)",
+							},
+							"permissions": map[string]any{
+								"type":        "array",
+								"items":       map[string]any{"type": "string"},
+								"description": "Requested permissions or roles",
+							},
+						},
+						Required: []string{"target"},
+					},
+				},
+				{
+					Name:        ToolRevokeCredential,
+					Description: "Explicitly revoke an active ephemeral credential lease before its TTL expires",
+					InputSchema: mcp.ToolInputSchema{
+						Type: "object",
+						Properties: map[string]any{
+							"lease_id": map[string]any{
+								"type":        "string",
+								"description": "Unique lease identifier to revoke",
+							},
+						},
+						Required: []string{"lease_id"},
+					},
+				},
+				{
+					Name:        ToolListLeases,
+					Description: "List all currently active ephemeral credential leases and remaining TTLs",
+					InputSchema: mcp.ToolInputSchema{
+						Type: "object",
+					},
+				},
+			},
+		})
+	})
+
+	// 5. Standard MCP: tools/call
+	dispatcher.RegisterRequestHandler(mcp.MethodToolsCall, func(ctx context.Context, req *mcp.Request) (*mcp.Response, error) {
+		var params mcp.CallToolParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				return nil, mcp.NewInvalidParamsError("failed to parse tool call params: " + err.Error())
+			}
+		}
+
+		// Forward argument payload as params to tool sub-handler
+		argBytes, _ := json.Marshal(params.Arguments)
+		subReq := &mcp.Request{
+			JSONRPC: req.JSONRPC,
+			ID:      req.ID,
+			Method:  params.Name,
+			Params:  argBytes,
+		}
+
+		rawID := subReq.ID
+		rawMsg := &mcp.RawMessage{
+			JSONRPC: subReq.JSONRPC,
+			ID:      &rawID,
+			Method:  subReq.Method,
+			Params:  subReq.Params,
+		}
+
+		return dispatcher.Dispatch(ctx, rawMsg)
+	})
 }
