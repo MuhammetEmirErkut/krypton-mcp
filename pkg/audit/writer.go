@@ -1,12 +1,14 @@
 package audit
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -29,13 +31,34 @@ func NewFileWriter(path string) (*LogWriter, error) {
 		return nil, fmt.Errorf("failed to create audit log directory: %w", err)
 	}
 
+	tree := NewMerkleTree()
+	if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+		file, err := os.Open(path)
+		if err == nil {
+			scanner := bufio.NewScanner(file)
+			buf := make([]byte, 1024*1024)
+			scanner.Buffer(buf, 10*1024*1024)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" {
+					continue
+				}
+				var evt AuditEvent
+				if err := json.Unmarshal([]byte(line), &evt); err == nil {
+					_, _, _ = tree.AppendEvent(&evt)
+				}
+			}
+			_ = file.Close()
+		}
+	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open audit log file: %w", err)
 	}
 
 	return &LogWriter{
-		tree:   NewMerkleTree(),
+		tree:   tree,
 		writer: file,
 		closer: file,
 	}, nil

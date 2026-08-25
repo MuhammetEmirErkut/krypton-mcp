@@ -6,7 +6,7 @@
 
 *Deterministic PII Masking • Prompt Injection Guardrails • JIT Ephemeral Credentials • Signed Merkle Audit Ledger*
 
-[![CI](https://github.com/krypton-mcp/krypton/actions/workflows/ci.yml/badge.svg)](https://github.com/krypton-mcp/krypton/actions/workflows/ci.yml)
+[![CI](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![MCP Compliant](https://img.shields.io/badge/MCP-2024--11--05-8A2BE2)](https://modelcontextprotocol.io)
@@ -15,12 +15,12 @@
 <br />
 
 ```
-    ┌────────────────┐        ┌─────────────────────────┐        ┌──────────────────────┐
-    │                │        │       KryptonMCP        │        │                      │
-    │   AI Client    │ ───►  │   Zero-Trust Gateway    │ ───►  │ Downstream Services  │
-    │ (Claude/Cursor)│ ◄───  │ (Mask / Policy / Audit) │ ◄───  │ (Postgres/Redis/API) │
-    │                │        │                         │        │                      │
-    └────────────────┘        └─────────────────────────┘        └──────────────────────┘
+┌──────────────────┐          ┌───────────────────────────┐          ┌─────────────────────────┐
+│                  │          │        KryptonMCP         │          │                         │
+│    AI Client     │  ──────► │    Zero-Trust Gateway     │  ──────► │   Downstream Services   │
+│ (Claude, Cursor) │  ◄────── │  (Mask / Policy / Audit)  │  ◄────── │  (Postgres, Redis, API) │
+│                  │          │                           │          │                         │
+└──────────────────┘          └───────────────────────────┘          └─────────────────────────┘
 ```
 
 </div>
@@ -42,25 +42,29 @@ Connecting AI models (like Claude, Cursor, Windsurf, LangChain, AutoGen) directl
 ## 🌟 Core Pillars
 
 ```mermaid
-graph TD
-    Client[AI Client / Claude / Cursor] -->|JSON-RPC Request| Proxy[KryptonMCP Gateway]
-    
-    subgraph Security Engines
-        Proxy --> G[1. Prompt-Injection Guardrails & RBAC]
-        G --> M1[2. Inbound Detokenization Engine]
-        M1 --> B[3. JIT Ephemeral Credential Broker]
-        B --> A1[4. Merkle Audit Signer]
+flowchart TD
+    Client["🤖 AI Client (Claude / Cursor / Windsurf)"]
+
+    subgraph InboundPipeline["🔒 Inbound Security Pipeline"]
+        G["1. Prompt-Injection Guardrails & RBAC"]
+        D["2. Inbound Detokenization Engine"]
+        B["3. JIT Ephemeral Credential Broker"]
+        A1["4. Merkle Audit Signer"]
+        G --> D --> B --> A1
     end
-    
-    Proxy -->|Sanitized Request| Downstream[Downstream MCP Server / DB]
-    Downstream -->|Cleartext Result| Outbound[Response Pipeline]
-    
-    subgraph Outbound Filters
-        Outbound --> M2[In-Flight PII Masking & AES-256-GCM Vault]
-        M2 --> A2[Merkle Leaf Digest & JSONL Sync]
+
+    Downstream[("🗄️ Downstream MCP Server / DB (Postgres, Redis, APIs)")]
+
+    subgraph OutboundPipeline["🎭 Outbound Privacy Pipeline"]
+        M["5. In-Flight PII Masker (AES-256-GCM Vault)"]
+        A2["6. Merkle Leaf Digest & JSONL Sync"]
+        M --> A2
     end
-    
-    Outbound -->|Masked Surrogate Tokens| Client
+
+    Client -->|"1. JSON-RPC Tool Request"| G
+    A1 -->|"2. Sanitized Cleartext Request"| Downstream
+    Downstream -->|"3. Raw Database / API Result"| M
+    A2 -->|"4. Protected Result with Surrogate Tokens"| Client
 ```
 
 ### 1. 🎭 In-Flight Deterministic PII Masking
@@ -95,12 +99,12 @@ graph TD
 
 ```bash
 # Build standalone binary from source (Zero dependencies, pure Go)
-git clone https://github.com/krypton-mcp/krypton.git
-cd krypton
-go build -o bin/krypton ./cmd/krypton
+git clone https://github.com/MuhammetEmirErkut/krypton-mcp.git
+cd krypton-mcp
+go build -o krypton ./cmd/krypton
 
 # Or pull the production Docker image
-docker pull ghcr.io/krypton-mcp/krypton:latest
+docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
 ```
 
 ### Initialize Configuration

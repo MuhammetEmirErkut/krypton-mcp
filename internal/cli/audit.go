@@ -26,7 +26,11 @@ func NewAuditCmd() *cobra.Command {
 }
 
 func newAuditKeygenCmd() *cobra.Command {
-	var outDir string
+	var (
+		outDir   string
+		privPath string
+		pubPath  string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "keygen",
@@ -37,8 +41,12 @@ func newAuditKeygenCmd() *cobra.Command {
 				return fmt.Errorf("failed to generate keypair: %w", err)
 			}
 
-			privPath := filepath.Join(outDir, "krypton_audit.key")
-			pubPath := filepath.Join(outDir, "krypton_audit.pub")
+			if privPath == "" {
+				privPath = filepath.Join(outDir, "krypton_audit.key")
+			}
+			if pubPath == "" {
+				pubPath = filepath.Join(outDir, "krypton_audit.pub")
+			}
 
 			if err := audit.SaveKeyPair(kp, privPath, pubPath); err != nil {
 				return fmt.Errorf("failed to save keypair: %w", err)
@@ -52,7 +60,9 @@ func newAuditKeygenCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&outDir, "out-dir", ".", "Directory to output keys into")
+	cmd.Flags().StringVarP(&outDir, "out-dir", "o", ".", "Directory to output keys into")
+	cmd.Flags().StringVarP(&privPath, "priv-key", "k", "", "Path for private key output")
+	cmd.Flags().StringVarP(&pubPath, "pub-key", "p", "", "Path for public key output")
 	return cmd
 }
 
@@ -63,11 +73,21 @@ func newAuditVerifyCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "verify",
+		Use:   "verify [log-file]",
 		Short: "Cryptographically verify the integrity of an audit log file",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				logFile = args[0]
+			} else if logFile == "audit.jsonl" {
+				if _, err := os.Stat("audit.jsonl"); os.IsNotExist(err) {
+					if _, err := os.Stat("krypton-audit.log"); err == nil {
+						logFile = "krypton-audit.log"
+					}
+				}
+			}
+
 			if logFile == "" {
-				return fmt.Errorf("--log-file is required")
+				return fmt.Errorf("log file is required (pass as argument or via -f/--log-file)")
 			}
 
 			var pub ed25519PublicKeyWrapper
@@ -86,7 +106,7 @@ func newAuditVerifyCmd() *cobra.Command {
 
 			if report.Valid {
 				fmt.Printf("✅ Audit ledger verification PASSED\n")
-				fmt.Printf("   Total Events:   %d\n", report.TotalEvents)
+				fmt.Printf("   Total Events:      %d\n", report.TotalEvents)
 				fmt.Printf("   Final Merkle Root: %s\n", report.ComputedRoot)
 				return nil
 			}
@@ -111,11 +131,21 @@ func newAuditProofCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "proof",
+		Use:   "proof [log-file]",
 		Short: "Export a cryptographic inclusion proof for a specific audit log index",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				logFile = args[0]
+			} else if logFile == "audit.jsonl" {
+				if _, err := os.Stat("audit.jsonl"); os.IsNotExist(err) {
+					if _, err := os.Stat("krypton-audit.log"); err == nil {
+						logFile = "krypton-audit.log"
+					}
+				}
+			}
+
 			if logFile == "" {
-				return fmt.Errorf("--log-file is required")
+				return fmt.Errorf("log file is required (pass as argument or via -f/--log-file)")
 			}
 
 			proof, err := audit.ExportProofFromLog(logFile, index)
