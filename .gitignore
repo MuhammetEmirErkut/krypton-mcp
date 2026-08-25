@@ -9,8 +9,8 @@
 *.dll
 *.so
 *.dylib
-krypton
-krypton-mcp
+/krypton
+/krypton-mcp
 
 # Test and coverage artifacts
 *.out
