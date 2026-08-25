@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -10,9 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestHelperProcess provides a cross-platform echo process for subprocess tests
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	_, _ = io.Copy(os.Stdout, os.Stdin)
+	os.Exit(0)
+}
+
+func getEchoCommand() (string, []string, map[string]string) {
+	return os.Args[0], []string{"-test.run=TestHelperProcess", "--"}, map[string]string{"GO_WANT_HELPER_PROCESS": "1"}
+}
+
 func TestProcessSupervisor_EchoLifecycle(t *testing.T) {
-	// Use 'cat' which echoes stdin to stdout until stdin is closed
-	sup := NewProcessSupervisor("cat", nil, map[string]string{"TEST_ENV": "1"}, "")
+	cmd, args, env := getEchoCommand()
+	sup := NewProcessSupervisor(cmd, args, env, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

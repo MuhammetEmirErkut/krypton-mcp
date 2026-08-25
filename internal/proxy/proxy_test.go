@@ -260,8 +260,11 @@ func TestGatewayProxy_SubprocessLifecycle(t *testing.T) {
 	clientInPipeR, clientInPipeW := io.Pipe()
 	clientOutPipeR, clientOutPipeW := io.Pipe()
 
+	cmd, args, env := getEchoCommand()
 	cfg := config.DefaultConfig()
-	cfg.Downstream.Command = "cat" // acts as downstream echo server
+	cfg.Downstream.Command = cmd
+	cfg.Downstream.Args = args
+	cfg.Downstream.Env = env
 
 	proxy := NewSubprocessGatewayProxy(cfg, clientInPipeR, clientOutPipeW)
 
@@ -275,7 +278,7 @@ func TestGatewayProxy_SubprocessLifecycle(t *testing.T) {
 	clientWriter := mcp.NewFramingWriter(clientInPipeW)
 	clientReader := mcp.NewFramingReader(clientOutPipeR)
 
-	// Send ping through cat subprocess echo
+	// Send ping through subprocess echo
 	req, _ := mcp.NewRequest(mcp.NewIntID(123), "ping", nil)
 	require.NoError(t, clientWriter.WriteMessage(req))
 

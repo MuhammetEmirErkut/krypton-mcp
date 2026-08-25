@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }} - Go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -29,8 +29,13 @@ jobs:
     - name: Verify Dependencies
       run: go mod verify
 
-    - name: Run Tests with Race Detector
+    - name: Run Tests (Linux/macOS with Race Detector)
+      if: runner.os != 'Windows'
       run: go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+
+    - name: Run Tests (Windows)
+      if: runner.os == 'Windows'
+      run: go test -v -covermode=atomic -coverprofile=coverage.out ./...
 
     - name: Build Binary
       run: go build -v ./cmd/krypton
