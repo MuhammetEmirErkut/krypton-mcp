@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 
 	"github.com/krypton-mcp/krypton/internal/config"
@@ -26,8 +27,9 @@ type ResponseInterceptor func(ctx context.Context, raw *mcp.RawMessage) (modifie
 
 // GatewayProxy bridges an AI Client with a Downstream MCP Server through security filters
 type GatewayProxy struct {
-	cfg        *config.Config
-	supervisor *ProcessSupervisor
+	cfg            *config.Config
+	supervisor     *ProcessSupervisor
+	httpDownstream *HTTPDownstreamClient
 
 	clientReader     *mcp.FramingReader
 	clientWriter     *mcp.FramingWriter
@@ -66,22 +68,34 @@ func NewGatewayProxy(cfg *config.Config, streams GatewayStreams) *GatewayProxy {
 		respInterceptors: make([]ResponseInterceptor, 0),
 	}
 
+	if cfg != nil && cfg.Downstream.URL != "" {
+		proxy.httpDownstream = NewHTTPDownstreamClient(cfg.Downstream.URL)
+	}
+
 	proxy.initSecurityPipelines()
 	return proxy
 }
 
-// NewSubprocessGatewayProxy creates a GatewayProxy that spawns and manages a downstream process
+// NewSubprocessGatewayProxy creates a GatewayProxy that spawns and manages a downstream process or remote HTTP downstream
 func NewSubprocessGatewayProxy(cfg *config.Config, clientIn io.Reader, clientOut io.Writer) *GatewayProxy {
-	sup := NewProcessSupervisor(
-		cfg.Downstream.Command,
-		cfg.Downstream.Args,
-		cfg.Downstream.Env,
-		cfg.Downstream.WorkingDir,
-	)
+	var sup *ProcessSupervisor
+	var httpDs *HTTPDownstreamClient
+
+	if cfg.Downstream.URL != "" {
+		httpDs = NewHTTPDownstreamClient(cfg.Downstream.URL)
+	} else if cfg.Downstream.Command != "" {
+		sup = NewProcessSupervisor(
+			cfg.Downstream.Command,
+			cfg.Downstream.Args,
+			cfg.Downstream.Env,
+			cfg.Downstream.WorkingDir,
+		)
+	}
 
 	proxy := &GatewayProxy{
 		cfg:              cfg,
 		supervisor:       sup,
+		httpDownstream:   httpDs,
 		clientReader:     mcp.NewFramingReader(clientIn),
 		clientWriter:     mcp.NewFramingWriter(clientOut),
 		reqInterceptors:  make([]RequestInterceptor, 0),
@@ -124,7 +138,9 @@ func (p *GatewayProxy) initSecurityPipelines() {
 	if p.cfg.Security.GuardrailsEnabled {
 		p.injectionDetector = guardrails.NewInjectionDetector()
 		if p.policyEngine == nil {
-			p.policyEngine, _ = guardrails.NewPolicyEngine(nil)
+			polCfg := p.cfg.Guardrails.ToPolicyConfig()
+			pe, _ := guardrails.NewPolicyEngine(polCfg)
+			p.policyEngine = pe
 		}
 
 		p.AddRequestInterceptor(func(ctx context.Context, raw *mcp.RawMessage) (*mcp.Response, bool, error) {
@@ -184,6 +200,13 @@ func (p *GatewayProxy) AttachAuditWriter(w *audit.LogWriter) {
 	p.auditWriter = w
 }
 
+// SetHTTPDownstream sets the downstream HTTP client
+func (p *GatewayProxy) SetHTTPDownstream(c *HTTPDownstreamClient) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.httpDownstream = c
+}
+
 // Tokenizer returns the active tokenizer instance
 func (p *GatewayProxy) Tokenizer() *masker.Tokenizer {
 	p.mu.Lock()
@@ -205,9 +228,33 @@ func (p *GatewayProxy) AddResponseInterceptor(interceptor ResponseInterceptor) {
 	p.respInterceptors = append(p.respInterceptors, interceptor)
 }
 
-// Start launches the downstream process (if configured) and starts bidirectional proxying
+// Start launches the downstream process or connects to remote HTTP downstream and begins proxying
 func (p *GatewayProxy) Start(ctx context.Context) error {
-	if p.supervisor != nil {
+	if p.cfg != nil {
+		fmt.Fprintf(os.Stderr, "[krypton] Zero-Trust Gateway running (transport: stdio, masking: %t, guardrails: %t, audit: %t)\n",
+			p.cfg.Security.MaskingEnabled, p.cfg.Security.GuardrailsEnabled, p.cfg.Security.AuditEnabled)
+
+		if p.httpDownstream != nil {
+			fmt.Fprintf(os.Stderr, "[krypton] Downstream target (HTTP): %s\n", p.cfg.Downstream.URL)
+			return p.startHTTPDownstreamStdioLoop(ctx)
+		}
+
+		if p.supervisor != nil {
+			fmt.Fprintf(os.Stderr, "[krypton] Downstream target (Subprocess): %s %v\n", p.cfg.Downstream.Command, p.cfg.Downstream.Args)
+			dsIn, dsOut, _, err := p.supervisor.Start(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to start downstream server: %w", err)
+			}
+			defer func() {
+				_ = p.supervisor.Stop()
+			}()
+
+			p.downstreamWriter = mcp.NewFramingWriter(dsIn)
+			p.downstreamReader = mcp.NewFramingReader(dsOut)
+		}
+	} else if p.httpDownstream != nil {
+		return p.startHTTPDownstreamStdioLoop(ctx)
+	} else if p.supervisor != nil {
 		dsIn, dsOut, _, err := p.supervisor.Start(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to start downstream server: %w", err)
@@ -258,6 +305,157 @@ func (p *GatewayProxy) Start(ctx context.Context) error {
 	}
 }
 
+func (p *GatewayProxy) startHTTPDownstreamStdioLoop(ctx context.Context) error {
+	defer func() {
+		p.mu.Lock()
+		if p.auditWriter != nil {
+			_ = p.auditWriter.Close()
+		}
+		p.mu.Unlock()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		raw, _, err := p.clientReader.ReadMessage(ctx)
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				fmt.Fprintf(os.Stderr, "[krypton] Client stdin closed (EOF). Gateway shutting down cleanly.\n")
+				return nil
+			}
+			parseErr := mcp.NewErrorResponse(mcp.RequestID{IsNull: true}, mcp.NewParseError(err.Error()))
+			_ = p.clientWriter.WriteMessage(parseErr)
+			continue
+		}
+
+		resp, err := p.HandleClientRequest(ctx, raw)
+		if err != nil {
+			if raw.ID != nil {
+				resp = mcp.NewErrorResponse(*raw.ID, mcp.NewInternalError(err.Error()))
+			}
+		}
+
+		if resp != nil {
+			if err := p.clientWriter.WriteMessage(resp); err != nil {
+				return fmt.Errorf("failed to write response to client: %w", err)
+			}
+		}
+	}
+}
+
+// HandleClientRequest runs the complete inbound and outbound security pipeline for a single request
+func (p *GatewayProxy) HandleClientRequest(ctx context.Context, raw *mcp.RawMessage) (*mcp.Response, error) {
+	// 1. Run request interceptors
+	p.mu.Lock()
+	interceptors := make([]RequestInterceptor, len(p.reqInterceptors))
+	copy(interceptors, p.reqInterceptors)
+	p.mu.Unlock()
+
+	for _, interceptor := range interceptors {
+		resp, shouldIntercept, err := interceptor(ctx, raw)
+		if err != nil {
+			if raw.ID != nil {
+				return mcp.NewErrorResponse(*raw.ID, mcp.NewInternalError(err.Error())), nil
+			}
+			return nil, err
+		}
+		if shouldIntercept {
+			return resp, nil
+		}
+	}
+
+	// 2. Forward to downstream
+	var downstreamRaw *mcp.RawMessage
+	if p.httpDownstream != nil {
+		var err error
+		downstreamRaw, err = p.httpDownstream.Forward(ctx, raw)
+		if err != nil {
+			if raw.ID != nil {
+				return mcp.NewErrorResponse(*raw.ID, mcp.NewInternalError(err.Error())), nil
+			}
+			return nil, err
+		}
+	} else if p.downstreamWriter != nil && p.downstreamReader != nil {
+		if err := p.downstreamWriter.WriteMessage(raw); err != nil {
+			return nil, fmt.Errorf("failed to write to downstream process: %w", err)
+		}
+		var err error
+		downstreamRaw, _, err = p.downstreamReader.ReadMessage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read from downstream process: %w", err)
+		}
+	} else {
+		return nil, errors.New("no downstream transport available")
+	}
+
+	if downstreamRaw == nil {
+		return nil, nil
+	}
+
+	// 3. Run response interceptors
+	p.mu.Lock()
+	respInterceptors := make([]ResponseInterceptor, len(p.respInterceptors))
+	copy(respInterceptors, p.respInterceptors)
+	p.mu.Unlock()
+
+	currentMsg := downstreamRaw
+	for _, interceptor := range respInterceptors {
+		mod, err := interceptor(ctx, currentMsg)
+		if err != nil {
+			break
+		}
+		if mod != nil {
+			currentMsg = mod
+		}
+	}
+
+	// 4. Convert to Response
+	if currentMsg.IsResponse() {
+		if currentMsg.Error != nil {
+			return mcp.NewErrorResponse(*currentMsg.ID, currentMsg.Error), nil
+		}
+		return &mcp.Response{
+			JSONRPC: currentMsg.JSONRPC,
+			ID:      *currentMsg.ID,
+			Result:  currentMsg.Result,
+		}, nil
+	}
+
+	return nil, nil
+}
+
+// HealthStatus returns health and readiness metadata for health checks
+func (p *GatewayProxy) HealthStatus(ctx context.Context) map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	dsStatus := "ready"
+	if p.supervisor != nil && !p.supervisor.IsRunning() {
+		dsStatus = "stopped"
+	}
+
+	res := map[string]any{
+		"downstream_status": dsStatus,
+	}
+
+	if p.cfg != nil {
+		res["security"] = map[string]any{
+			"masking":         p.cfg.Security.MaskingEnabled,
+			"masking_mode":    p.cfg.Masking.Mode,
+			"guardrails":      p.cfg.Security.GuardrailsEnabled,
+			"audit":           p.cfg.Security.AuditEnabled,
+			"ephemeral_creds": p.cfg.Security.EphemeralCredsEnabled,
+		}
+		res["downstream_transport"] = p.cfg.Downstream.Transport
+	}
+
+	return res
+}
+
 func (p *GatewayProxy) forwardClientToDownstream(ctx context.Context) error {
 	for {
 		select {
@@ -269,6 +467,7 @@ func (p *GatewayProxy) forwardClientToDownstream(ctx context.Context) error {
 		raw, rawBytes, err := p.clientReader.ReadMessage(ctx)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				fmt.Fprintf(os.Stderr, "[krypton] Client stdin closed (EOF). Gateway shutting down cleanly.\n")
 				return err
 			}
 			parseErr := mcp.NewErrorResponse(mcp.RequestID{IsNull: true}, mcp.NewParseError(err.Error()))
