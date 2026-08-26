@@ -151,5 +151,10 @@ func (fw *FramingWriter) WriteRaw(data []byte) error {
 	buf = append(buf, '\n')
 
 	_, err := fw.writer.Write(buf)
+	if err == nil {
+		if flusher, ok := fw.writer.(interface{ Flush() error }); ok {
+			_ = flusher.Flush()
+		}
+	}
 	return err
 }
