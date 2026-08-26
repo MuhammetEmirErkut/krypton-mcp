@@ -230,6 +230,53 @@ func TestEnvOverrides(t *testing.T) {
 	assert.Equal(t, "env-audit.log", cfg.Audit.LogPath)
 }
 
+func TestLoad_GuardrailsRBACAndDownstreamURL(t *testing.T) {
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "rbac_config.yaml")
+
+	yamlData := `
+version: "v1"
+server:
+  transport: "stdio"
+  log_level: "info"
+downstream:
+  transport: "http"
+  url: "http://localhost:8001/rpc"
+security:
+  guardrails_enabled: true
+guardrails:
+  block_injection: true
+  block_exfiltration: true
+  max_prompt_size_bytes: 1048576
+  allowed_tools:
+    - "query_*"
+    - "get_*"
+  denied_tools:
+    - "drop_*"
+    - "delete_database"
+  forbidden_tools:
+    - "execute_raw_shell"
+`
+	require.NoError(t, os.WriteFile(configFile, []byte(yamlData), 0600))
+
+	cfg, err := Load(configFile)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	assert.Equal(t, "http", cfg.Downstream.Transport)
+	assert.Equal(t, "http://localhost:8001/rpc", cfg.Downstream.URL)
+	assert.Equal(t, []string{"query_*", "get_*"}, cfg.Guardrails.AllowedTools)
+	assert.Equal(t, []string{"drop_*", "delete_database"}, cfg.Guardrails.DeniedTools)
+	assert.Equal(t, []string{"execute_raw_shell"}, cfg.Guardrails.ForbiddenTools)
+
+	polCfg := cfg.Guardrails.ToPolicyConfig()
+	require.NotNil(t, polCfg)
+	assert.Equal(t, []string{"query_*", "get_*"}, polCfg.AllowedTools)
+	assert.Contains(t, polCfg.ForbiddenTools, "execute_raw_shell")
+	assert.Contains(t, polCfg.ForbiddenTools, "drop_*")
+	assert.Contains(t, polCfg.ForbiddenTools, "delete_database")
+}
+
 func TestGenerateTemplateYAML(t *testing.T) {
 	tpl := GenerateTemplateYAML()
 	assert.NotEmpty(t, tpl)
@@ -238,4 +285,6 @@ func TestGenerateTemplateYAML(t *testing.T) {
 	err := yaml.Unmarshal([]byte(tpl), &parsed)
 	require.NoError(t, err)
 	assert.NoError(t, parsed.Validate())
+	assert.Equal(t, []string{"*"}, parsed.Guardrails.AllowedTools)
+	assert.Equal(t, []string{"drop_*", "delete_database", "execute_raw_shell"}, parsed.Guardrails.DeniedTools)
 }

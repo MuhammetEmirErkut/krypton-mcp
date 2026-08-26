@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/krypton-mcp/krypton/pkg/guardrails"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,6 +18,8 @@ const (
 	TransportStdio = "stdio"
 	// TransportSSE specifies Server-Sent Events / HTTP transport
 	TransportSSE = "sse"
+	// TransportHTTP specifies HTTP-based JSON-RPC transport for downstream
+	TransportHTTP = "http"
 
 	// MaskModeTokenize replaces sensitive data with reversible surrogate tokens
 	MaskModeTokenize = "tokenize"
@@ -42,10 +45,12 @@ type ServerConfig struct {
 	LogLevel  string `yaml:"log_level" json:"log_level"`
 }
 
-// DownstreamConfig defines the target MCP sub-process to proxy
+// DownstreamConfig defines the target MCP sub-process or remote HTTP/SSE service to proxy
 type DownstreamConfig struct {
-	Command    string            `yaml:"command" json:"command"`
-	Args       []string          `yaml:"args" json:"args"`
+	Transport  string            `yaml:"transport,omitempty" json:"transport,omitempty"`
+	URL        string            `yaml:"url,omitempty" json:"url,omitempty"`
+	Command    string            `yaml:"command,omitempty" json:"command,omitempty"`
+	Args       []string          `yaml:"args,omitempty" json:"args,omitempty"`
 	Env        map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 	WorkingDir string            `yaml:"working_dir,omitempty" json:"working_dir,omitempty"`
 }
@@ -66,11 +71,28 @@ type MaskingConfig struct {
 	ExcludedFields []string        `yaml:"excluded_fields,omitempty" json:"excluded_fields,omitempty"`
 }
 
-// GuardrailsConfig defines prompt injection and exfiltration policies
+// GuardrailsConfig defines prompt injection, RBAC, and exfiltration policies
 type GuardrailsConfig struct {
-	BlockInjection     bool  `yaml:"block_injection" json:"block_injection"`
-	BlockExfiltration  bool  `yaml:"block_exfiltration" json:"block_exfiltration"`
-	MaxPromptSizeBytes int64 `yaml:"max_prompt_size_bytes" json:"max_prompt_size_bytes"`
+	BlockInjection     bool                  `yaml:"block_injection" json:"block_injection"`
+	BlockExfiltration  bool                  `yaml:"block_exfiltration" json:"block_exfiltration"`
+	MaxPromptSizeBytes int64                 `yaml:"max_prompt_size_bytes" json:"max_prompt_size_bytes"`
+	AllowedTools       []string              `yaml:"allowed_tools,omitempty" json:"allowed_tools,omitempty"`
+	DeniedTools        []string              `yaml:"denied_tools,omitempty" json:"denied_tools,omitempty"`
+	ForbiddenTools     []string              `yaml:"forbidden_tools,omitempty" json:"forbidden_tools,omitempty"`
+	ToolRules          []guardrails.ToolRule `yaml:"tool_rules,omitempty" json:"tool_rules,omitempty"`
+}
+
+// ToPolicyConfig converts GuardrailsConfig into a PolicyConfig for the guardrails engine
+func (g *GuardrailsConfig) ToPolicyConfig() *guardrails.PolicyConfig {
+	forbidden := make([]string, 0, len(g.ForbiddenTools)+len(g.DeniedTools))
+	forbidden = append(forbidden, g.ForbiddenTools...)
+	forbidden = append(forbidden, g.DeniedTools...)
+
+	return &guardrails.PolicyConfig{
+		AllowedTools:   g.AllowedTools,
+		ForbiddenTools: forbidden,
+		ToolRules:      g.ToolRules,
+	}
 }
 
 // AuditConfig specifies tamper-evident Merkle logging settings
@@ -103,9 +125,11 @@ func DefaultConfig() *Config {
 			LogLevel:  "info",
 		},
 		Downstream: DownstreamConfig{
-			Command: "",
-			Args:    []string{},
-			Env:     make(map[string]string),
+			Transport: TransportStdio,
+			URL:       "",
+			Command:   "",
+			Args:      []string{},
+			Env:       make(map[string]string),
 		},
 		Security: SecurityConfig{
 			MaskingEnabled:        true,
@@ -131,6 +155,10 @@ func DefaultConfig() *Config {
 			BlockInjection:     true,
 			BlockExfiltration:  true,
 			MaxPromptSizeBytes: 1024 * 1024, // 1MB
+			AllowedTools:       []string{},
+			DeniedTools:        []string{},
+			ForbiddenTools:     []string{},
+			ToolRules:          []guardrails.ToolRule{},
 		},
 		Audit: AuditConfig{
 			LogPath:        "krypton-audit.log",
@@ -183,6 +211,12 @@ func (c *Config) applyEnvOverrides() {
 	if val := os.Getenv("KRYPTON_SERVER_LOG_LEVEL"); val != "" {
 		c.Server.LogLevel = strings.ToLower(val)
 	}
+	if val := os.Getenv("KRYPTON_DOWNSTREAM_TRANSPORT"); val != "" {
+		c.Downstream.Transport = strings.ToLower(val)
+	}
+	if val := os.Getenv("KRYPTON_DOWNSTREAM_URL"); val != "" {
+		c.Downstream.URL = val
+	}
 	if val := os.Getenv("KRYPTON_DOWNSTREAM_CMD"); val != "" {
 		c.Downstream.Command = val
 	}
@@ -230,6 +264,20 @@ func (c *Config) Validate() error {
 		}
 		if c.Server.Host == "" {
 			return errors.New("server host must not be empty when using SSE transport")
+		}
+	}
+
+	if c.Downstream.Transport == "" {
+		if c.Downstream.URL != "" {
+			c.Downstream.Transport = TransportHTTP
+		} else {
+			c.Downstream.Transport = TransportStdio
+		}
+	}
+
+	if c.Downstream.URL != "" {
+		if !strings.HasPrefix(c.Downstream.URL, "http://") && !strings.HasPrefix(c.Downstream.URL, "https://") {
+			return fmt.Errorf("invalid downstream url '%s': must start with http:// or https://", c.Downstream.URL)
 		}
 	}
 
@@ -283,7 +331,11 @@ server:
   log_level: "info"
 
 downstream:
-  # Downstream MCP server command to proxy
+  # Downstream MCP transport: "stdio" (sub-process) or "http" (remote network service)
+  transport: "stdio"
+  # Target remote MCP endpoint (when transport is "http")
+  # url: "http://localhost:8001/rpc"
+  # Downstream MCP server command to proxy (when transport is "stdio")
   # Example: "npx" with args ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"]
   command: ""
   args: []
@@ -314,6 +366,13 @@ guardrails:
   block_injection: true
   block_exfiltration: true
   max_prompt_size_bytes: 1048576 # 1 MB
+  # Declarative Tool RBAC
+  allowed_tools:
+    - "*"
+  denied_tools:
+    - "drop_*"
+    - "delete_database"
+    - "execute_raw_shell"
 
 audit:
   log_path: "krypton-audit.log"
