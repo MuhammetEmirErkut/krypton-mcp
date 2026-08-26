@@ -26,6 +26,7 @@ func NewStartCmd() *cobra.Command {
 		startHost          string
 		startPort          int
 		startDownstreamCmd string
+		startDownstreamURL string
 		startDryRun        bool
 	)
 
@@ -60,6 +61,15 @@ enforces guardrails, and signs audit logs.`,
 			if cmd.Flags().Changed("downstream-cmd") {
 				cfg.Downstream.Command = startDownstreamCmd
 			}
+			if cmd.Flags().Changed("downstream-url") {
+				cfg.Downstream.URL = startDownstreamURL
+				cfg.Downstream.Transport = config.TransportHTTP
+			}
+
+			if len(args) > 0 {
+				cfg.Downstream.Command = args[0]
+				cfg.Downstream.Args = args[1:]
+			}
 
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("invalid runtime configuration: %w", err)
@@ -67,8 +77,15 @@ enforces guardrails, and signs audit logs.`,
 
 			if startDryRun {
 				fmt.Fprintf(cmd.OutOrStdout(), "✓ KryptonMCP configuration validated successfully (dry-run mode).\n")
-				fmt.Fprintf(cmd.OutOrStdout(), "  Transport: %s\n", cfg.Server.Transport)
-				fmt.Fprintf(cmd.OutOrStdout(), "  Downstream Command: %s\n", cfg.Downstream.Command)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Server Transport: %s\n", cfg.Server.Transport)
+				if cfg.Server.Transport == config.TransportSSE {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Listening On: %s:%d\n", cfg.Server.Host, cfg.Server.Port)
+				}
+				if cfg.Downstream.URL != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Downstream URL: %s\n", cfg.Downstream.URL)
+				} else if cfg.Downstream.Command != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Downstream Command: %s %v\n", cfg.Downstream.Command, cfg.Downstream.Args)
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "  Masking Enabled: %t (Mode: %s)\n", cfg.Security.MaskingEnabled, cfg.Masking.Mode)
 				fmt.Fprintf(cmd.OutOrStdout(), "  Guardrails Enabled: %t\n", cfg.Security.GuardrailsEnabled)
 				fmt.Fprintf(cmd.OutOrStdout(), "  Audit Enabled: %t (Log: %s)\n", cfg.Security.AuditEnabled, cfg.Audit.LogPath)
@@ -78,17 +95,47 @@ enforces guardrails, and signs audit logs.`,
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			if len(args) > 0 {
-				cfg.Downstream.Command = args[0]
-				cfg.Downstream.Args = args[1:]
+			hasDownstream := cfg.Downstream.Command != "" || cfg.Downstream.URL != ""
+
+			// Handle SSE Server Transport Mode
+			if cfg.Server.Transport == config.TransportSSE {
+				addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+				fmt.Fprintf(os.Stderr, "[krypton] Starting HTTP/SSE Zero-Trust Gateway on http://%s\n", addr)
+				fmt.Fprintf(os.Stderr, "  Endpoints: /sse (SSE stream), /message (RPC), /rpc (Direct RPC), /health, /ready\n")
+
+				var handler mcp.MessageHandler
+				var healthProvider mcp.HealthStatusProvider
+
+				if hasDownstream {
+					gw := proxy.NewSubprocessGatewayProxy(cfg, nil, nil)
+					handler = gw.HandleClientRequest
+					healthProvider = gw
+				} else {
+					disp := mcp.NewDispatcher()
+					disp.BindStandardHandlers("krypton-gateway", "0.1.0-dev")
+
+					broker := credentials.NewBroker()
+					defer broker.Shutdown(ctx)
+					credentials.BindCredentialTools(disp, broker)
+
+					handler = func(ctx context.Context, req *mcp.RawMessage) (*mcp.Response, error) {
+						return disp.Dispatch(ctx, req)
+					}
+				}
+
+				sseServer := mcp.NewSSEServer(addr, handler, healthProvider)
+				return sseServer.Start(ctx)
 			}
 
-			if cfg.Downstream.Command != "" {
+			// Handle STDIO Transport Mode
+			if hasDownstream {
 				gw := proxy.NewSubprocessGatewayProxy(cfg, os.Stdin, os.Stdout)
 				return gw.Start(ctx)
 			}
 
-			// Standalone MCP Server Mode
+			// Standalone MCP Server Mode over stdio
+			fmt.Fprintf(os.Stderr, "[krypton] Zero-Trust Gateway running (standalone MCP server, transport: stdio)\n")
+
 			disp := mcp.NewDispatcher()
 			disp.BindStandardHandlers("krypton-gateway", "0.1.0-dev")
 
@@ -105,7 +152,8 @@ enforces guardrails, and signs audit logs.`,
 			var policyEngine *guardrails.PolicyEngine
 			if cfg.Security.GuardrailsEnabled {
 				injectionDetector = guardrails.NewInjectionDetector()
-				policyEngine, _ = guardrails.NewPolicyEngine(nil)
+				polCfg := cfg.Guardrails.ToPolicyConfig()
+				policyEngine, _ = guardrails.NewPolicyEngine(polCfg)
 			}
 
 			broker := credentials.NewBroker()
@@ -161,6 +209,7 @@ enforces guardrails, and signs audit logs.`,
 				raw, _, err := reader.ReadMessage(ctx)
 				if err != nil {
 					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+						fmt.Fprintf(os.Stderr, "[krypton] Client stdin closed (EOF). Standalone server shutting down cleanly.\n")
 						return nil
 					}
 					return err
@@ -185,6 +234,7 @@ enforces guardrails, and signs audit logs.`,
 	cmd.Flags().StringVar(&startHost, "host", "127.0.0.1", "Host address for SSE transport")
 	cmd.Flags().IntVarP(&startPort, "port", "p", 8080, "Port for SSE transport")
 	cmd.Flags().StringVar(&startDownstreamCmd, "downstream-cmd", "", "Command line for downstream MCP server")
+	cmd.Flags().StringVar(&startDownstreamURL, "downstream-url", "", "Remote URL for downstream MCP server (HTTP/SSE)")
 	cmd.Flags().BoolVar(&startDryRun, "dry-run", false, "Validate configuration and pipeline without executing")
 
 	return cmd

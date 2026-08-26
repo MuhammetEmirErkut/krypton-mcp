@@ -100,6 +100,10 @@ func (w *LogWriter) WriteEvent(evt *AuditEvent) error {
 		return fmt.Errorf("failed to write audit log entry: %w", err)
 	}
 
+	if syncer, ok := w.writer.(interface{ Sync() error }); ok {
+		_ = syncer.Sync()
+	}
+
 	return nil
 }
 
