@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/krypton_logo.png" alt="KryptonMCP Logo" width="200" />
+
 # 🛡️ KryptonMCP
 
 **The Zero-Trust Security & Privacy Gateway for AI Agents**
