@@ -117,7 +117,7 @@ docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
 
 ## ⚙️ Client Integration
 
-### 1. Claude Desktop Configuration
+### 1. Claude Desktop Configuration (Stdio Proxy Mode)
 Add Krypton as a transparent proxy in `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
@@ -136,7 +136,14 @@ Add Krypton as a transparent proxy in `~/Library/Application Support/Claude/clau
 }
 ```
 
-### 2. Cursor IDE Configuration
+### 2. Cursor IDE / Remote MCP Integration (HTTP & SSE Mode)
+For containerized or remote setups, launch Krypton as a secure network gateway:
+
+```bash
+# Launch SSE gateway on port 8080 proxying a remote MCP service
+krypton start --transport sse --host 0.0.0.0 --port 8080 --downstream-url http://downstream-service:8001/rpc
+```
+
 Add to `.cursor/mcp.json` in your workspace:
 
 ```json
@@ -159,7 +166,15 @@ version: "v1"
 
 server:
   transport: "stdio" # "stdio" or "sse"
+  host: "127.0.0.1"
+  port: 8080
   log_level: "info"
+
+downstream:
+  transport: "stdio" # "stdio" or "http"
+  # url: "http://localhost:8001/rpc"
+  command: ""
+  args: []
 
 security:
   masking_enabled: true
@@ -180,7 +195,15 @@ masking:
 
 guardrails:
   block_injection: true
+  block_exfiltration: true
   max_prompt_size_bytes: 1048576 # 1 MB
+  # Declarative Tool RBAC
+  allowed_tools:
+    - "*"
+  denied_tools:
+    - "drop_*"
+    - "delete_database"
+    - "execute_raw_shell"
 
 audit:
   log_path: "./audit.jsonl"
