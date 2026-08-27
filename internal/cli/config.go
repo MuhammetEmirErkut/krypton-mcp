@@ -76,5 +76,6 @@ func newConfigInitCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&targetFile, "output", "o", "krypton.yaml", "Destination file path")
+	cmd.Flags().StringVar(&targetFile, "out", "krypton.yaml", "Destination file path (alias for --output)")
 	return cmd
 }
