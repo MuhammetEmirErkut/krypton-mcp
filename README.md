@@ -1,11 +1,14 @@
 <div align="center">
 
+<img src="assets/krypton_logo.png" alt="KryptonMCP Logo" width="220" />
+
 # 🛡️ KryptonMCP
 
 **The Zero-Trust Security & Privacy Gateway for AI Agents**
 
 *Deterministic PII Masking • Prompt Injection Guardrails • JIT Ephemeral Credentials • Signed Merkle Audit Ledger*
 
+[![Release](https://img.shields.io/badge/Release-v0.1.0--alpha-blue.svg)](https://github.com/MuhammetEmirErkut/krypton-mcp/releases)
 [![CI](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -14,16 +17,18 @@
 
 <br />
 
-```
-┌──────────────────┐          ┌───────────────────────────┐          ┌─────────────────────────┐
-│                  │          │        KryptonMCP         │          │                         │
-│    AI Client     │  ──────► │    Zero-Trust Gateway     │  ──────► │   Downstream Services   │
-│ (Claude, Cursor) │  ◄────── │  (Mask / Policy / Audit)  │  ◄────── │  (Postgres, Redis, API) │
-│                  │          │                           │          │                         │
-└──────────────────┘          └───────────────────────────┘          └─────────────────────────┘
-```
+<img src="assets/krypton_demo.gif" alt="KryptonMCP Terminal Demo" width="800" />
 
 </div>
+
+---
+
+## 🤖 Instant Project Integration with AI
+
+> **Integrating into an existing project?**
+> We provide a drop-in AI prompt in [**`KRYPTON_INTEGRATION_PROMPT.md`**](KRYPTON_INTEGRATION_PROMPT.md). 
+> 
+> Simply copy and paste the entire prompt into **Claude Code, Cursor Composer, Windsurf, or Antigravity** in your project, and your AI assistant will automatically audit your tools, generate `krypton.yaml`, create Ed25519 audit keys, and wire up all MCP clients transparently!
 
 ---
 
@@ -98,26 +103,33 @@ flowchart TD
 ### Installation
 
 ```bash
-# Build standalone binary from source (Zero dependencies, pure Go)
+# Option 1: Install with Go (Zero dependencies)
+go install github.com/krypton-mcp/krypton/cmd/krypton@v0.1.0-alpha
+
+# Option 2: Pull the production Docker image
+docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
+
+# Option 3: Build from source
 git clone https://github.com/MuhammetEmirErkut/krypton-mcp.git
 cd krypton-mcp
 go build -o krypton ./cmd/krypton
-
-# Or pull the production Docker image
-docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
 ```
 
-### Initialize Configuration
+### Initialize Configuration & Audit Keys
 
 ```bash
-./bin/krypton config init --out krypton.yaml
+# 1. Generate production configuration template
+krypton config init --out krypton.yaml
+
+# 2. Generate Ed25519 cryptographic audit signing keypair
+krypton audit keygen --out-dir ./security-keys
 ```
 
 ---
 
 ## ⚙️ Client Integration
 
-### 1. Claude Desktop Configuration
+### 1. Claude Desktop Configuration (Stdio Proxy Mode)
 Add Krypton as a transparent proxy in `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
@@ -136,7 +148,14 @@ Add Krypton as a transparent proxy in `~/Library/Application Support/Claude/clau
 }
 ```
 
-### 2. Cursor IDE Configuration
+### 2. Cursor IDE / Remote MCP Integration (HTTP & SSE Mode)
+For containerized or remote setups, launch Krypton as a secure network gateway:
+
+```bash
+# Launch SSE gateway on port 8080 proxying a remote MCP service
+krypton start --transport sse --host 0.0.0.0 --port 8080 --downstream-url http://downstream-service:8001/rpc
+```
+
 Add to `.cursor/mcp.json` in your workspace:
 
 ```json
@@ -159,7 +178,15 @@ version: "v1"
 
 server:
   transport: "stdio" # "stdio" or "sse"
+  host: "127.0.0.1"
+  port: 8080
   log_level: "info"
+
+downstream:
+  transport: "stdio" # "stdio" or "http"
+  # url: "http://localhost:8001/rpc"
+  command: ""
+  args: []
 
 security:
   masking_enabled: true
@@ -180,7 +207,15 @@ masking:
 
 guardrails:
   block_injection: true
+  block_exfiltration: true
   max_prompt_size_bytes: 1048576 # 1 MB
+  # Declarative Tool RBAC
+  allowed_tools:
+    - "*"
+  denied_tools:
+    - "drop_*"
+    - "delete_database"
+    - "execute_raw_shell"
 
 audit:
   log_path: "./audit.jsonl"

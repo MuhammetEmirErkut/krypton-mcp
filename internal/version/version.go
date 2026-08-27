@@ -7,7 +7,7 @@ import (
 
 var (
 	// Version is the current semantic version of KryptonMCP
-	Version = "0.1.0-dev"
+	Version = "0.1.0-alpha"
 	// GitCommit is the git commit hash injected at build time
 	GitCommit = "HEAD"
 	// BuildDate is the RFC3339 build timestamp injected at build time
