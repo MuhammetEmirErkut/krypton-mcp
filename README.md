@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/krypton_logo.png" alt="KryptonMCP Logo" width="200" />
+<img src="assets/krypton_logo.png" alt="KryptonMCP Logo" width="220" />
 
 # 🛡️ KryptonMCP
 
@@ -8,6 +8,7 @@
 
 *Deterministic PII Masking • Prompt Injection Guardrails • JIT Ephemeral Credentials • Signed Merkle Audit Ledger*
 
+[![Release](https://img.shields.io/badge/Release-v0.1.0--alpha-blue.svg)](https://github.com/MuhammetEmirErkut/krypton-mcp/releases)
 [![CI](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammetEmirErkut/krypton-mcp/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -16,16 +17,18 @@
 
 <br />
 
-```
-┌──────────────────┐          ┌───────────────────────────┐          ┌─────────────────────────┐
-│                  │          │        KryptonMCP         │          │                         │
-│    AI Client     │  ──────► │    Zero-Trust Gateway     │  ──────► │   Downstream Services   │
-│ (Claude, Cursor) │  ◄────── │  (Mask / Policy / Audit)  │  ◄────── │  (Postgres, Redis, API) │
-│                  │          │                           │          │                         │
-└──────────────────┘          └───────────────────────────┘          └─────────────────────────┘
-```
+<img src="assets/krypton_demo.gif" alt="KryptonMCP Terminal Demo" width="800" />
 
 </div>
+
+---
+
+## 🤖 Instant Project Integration with AI
+
+> **Integrating into an existing project?**
+> We provide a drop-in AI prompt in [**`KRYPTON_INTEGRATION_PROMPT.md`**](KRYPTON_INTEGRATION_PROMPT.md). 
+> 
+> Simply copy and paste the entire prompt into **Claude Code, Cursor Composer, Windsurf, or Antigravity** in your project, and your AI assistant will automatically audit your tools, generate `krypton.yaml`, create Ed25519 audit keys, and wire up all MCP clients transparently!
 
 ---
 
@@ -100,19 +103,26 @@ flowchart TD
 ### Installation
 
 ```bash
-# Build standalone binary from source (Zero dependencies, pure Go)
+# Option 1: Install with Go (Zero dependencies)
+go install github.com/krypton-mcp/krypton/cmd/krypton@v0.1.0-alpha
+
+# Option 2: Pull the production Docker image
+docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
+
+# Option 3: Build from source
 git clone https://github.com/MuhammetEmirErkut/krypton-mcp.git
 cd krypton-mcp
 go build -o krypton ./cmd/krypton
-
-# Or pull the production Docker image
-docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
 ```
 
-### Initialize Configuration
+### Initialize Configuration & Audit Keys
 
 ```bash
-./bin/krypton config init --out krypton.yaml
+# 1. Generate production configuration template
+krypton config init --out krypton.yaml
+
+# 2. Generate Ed25519 cryptographic audit signing keypair
+krypton audit keygen --out-dir ./security-keys
 ```
 
 ---
