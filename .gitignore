@@ -1,6 +1,6 @@
-# KryptonMCP - Git Ignore Rules
+# KryptonMCP - Professional Git Ignore Rules
 
-# Binaries and build artifacts
+# 1. Binaries and build artifacts
 /bin/
 /dist/
 /build/
@@ -12,23 +12,21 @@
 /krypton
 /krypton-mcp
 
-# Test and coverage artifacts
+# 2. Test and coverage artifacts
 *.out
 *.test
 coverage.html
 coverage.txt
 .coverage/
 
-# Developer private checklist and local task tracker (CRITICAL: NEVER COMMIT)
+# 3. Developer private checklist and local task tracker (CRITICAL: NEVER COMMIT)
 DEVELOPER.md
 DEVELOPER.local.md
-*.local.md
-
 MEMORY.md
 MEMORY.local.md
 *.local.md
 
-# Secrets, keys, and environment files
+# 4. Secrets, private keys, certificates, and generated credentials
 .env
 .env.*
 *.pem
@@ -39,8 +37,36 @@ MEMORY.local.md
 /secrets/
 /credentials/
 /local_keys/
+/security-keys/
 
-# IDE and OS specific files
+# 5. Local Runtime Configuration Files (Prevent accidental commit of production/local DB secrets)
+krypton.yaml
+krypton.yml
+config.yaml
+config.yml
+*.local.yaml
+*.local.yml
+demo-*.yaml
+demo-*.yml
+test-*.yaml
+test-*.yml
+
+# (Allow example/template configs)
+!*.example.yaml
+!*.example.yml
+!*.template.yaml
+!*.template.yml
+
+# 6. Runtime logs, databases, and Merkle audit ledgers
+*.log
+*.jsonl
+krypton-audit.log
+audit.jsonl
+audit_cache/
+tmp/
+temp/
+
+# 7. IDE, OS, and tool artifacts
 .DS_Store
 .DS_Store?
 ._*
@@ -53,14 +79,4 @@ Thumbs.db
 *.swp
 *.swo
 *~
-
-# Temporary, audit, and demo configuration files
-*.log
-*.jsonl
-demo-*.yaml
-demo-*.yml
-*.local.yaml
-*.local.yml
-tmp/
-temp/
-audit_cache/
+demo.tape
