@@ -47,27 +47,29 @@ Connecting AI models (like Claude, Cursor, Windsurf, LangChain, AutoGen) directl
 ## 🌟 Core Pillars
 
 ```mermaid
-flowchart LR
-    Client["🤖 <b>AI Clients</b><br/><code>Claude • Cursor • LangChain</code><br/><i>(stdio / HTTP-SSE)</i>"]
+flowchart TD
+    Client["🤖 AI Client (Claude / Cursor / Windsurf / LangChain)"]
 
-    subgraph Gateway["🛡️ KryptonMCP Zero-Trust Gateway"]
-        direction TB
-        Inbound["1. Guardrails RBAC & Detokenizer"]
-        Vault[("🔑 Ephemeral AES-256-GCM Vault")]
-        Outbound["2. In-Flight PII Masker (Luhn / Regex)"]
-        Audit["3. Signed Merkle Audit Ledger (Ed25519)"]
-
-        Inbound <--> Vault
-        Vault <--> Outbound
-        Outbound --> Audit
+    subgraph InboundPipeline["🔒 Inbound Security Pipeline"]
+        G["1. Prompt-Injection Guardrails & RBAC"]
+        D["2. Inbound Detokenization Engine"]
+        B["3. JIT Ephemeral Credential Broker"]
+        A1["4. Merkle Audit Signer (Ed25519)"]
+        G --> D --> B --> A1
     end
 
-    Downstream[("🗄️ <b>Downstream Services</b><br/><code>Postgres • Redis • APIs</code><br/><i>(Subprocess stdio or Remote HTTP)</i>")]
+    Downstream[("🗄️ Downstream Services (Postgres, Redis, Remote APIs)")]
 
-    Client -->|"1. Request"| Inbound
-    Inbound -->|"2. Sanitized Request"| Downstream
-    Downstream -->|"3. Raw Response"| Outbound
-    Audit -->|"4. Protected Result ([EMAIL_REF_...])"| Client
+    subgraph OutboundPipeline["🎭 Outbound Privacy Pipeline"]
+        M["5. In-Flight PII Masker (AES-256-GCM Vault)"]
+        A2["6. Merkle Leaf Digest & JSONL Sync"]
+        M --> A2
+    end
+
+    Client -->|"1. JSON-RPC Tool Request (stdio / SSE)"| G
+    A1 -->|"2. Sanitized Cleartext Request"| Downstream
+    Downstream -->|"3. Raw Database / API Result"| M
+    A2 -->|"4. Protected Result with Surrogate Tokens ([EMAIL_REF_...])"| Client
 ```
 
 ### 1. 🎭 In-Flight Deterministic PII Masking
