@@ -48,28 +48,65 @@ Connecting AI models (like Claude, Cursor, Windsurf, LangChain, AutoGen) directl
 
 ```mermaid
 flowchart TD
-    Client["🤖 AI Client (Claude / Cursor / Windsurf)"]
-
-    subgraph InboundPipeline["🔒 Inbound Security Pipeline"]
-        G["1. Prompt-Injection Guardrails & RBAC"]
-        D["2. Inbound Detokenization Engine"]
-        B["3. JIT Ephemeral Credential Broker"]
-        A1["4. Merkle Audit Signer"]
-        G --> D --> B --> A1
+    subgraph Clients["🤖 AI Clients & Frameworks"]
+        C1["Desktop IDEs (Claude / Cursor / Windsurf)"]
+        C2["Agent Frameworks (LangChain / AutoGen / CrewAI)"]
+        C3["Cloud Microservices & Web Apps"]
     end
 
-    Downstream[("🗄️ Downstream MCP Server / DB (Postgres, Redis, APIs)")]
-
-    subgraph OutboundPipeline["🎭 Outbound Privacy Pipeline"]
-        M["5. In-Flight PII Masker (AES-256-GCM Vault)"]
-        A2["6. Merkle Leaf Digest & JSONL Sync"]
-        M --> A2
+    subgraph Transports["🔌 Inbound Transports"]
+        T1["Stdio Pipe (JSON-RPC)"]
+        T2["HTTP / SSE Stream (/sse, /message, /rpc)"]
     end
 
-    Client -->|"1. JSON-RPC Tool Request"| G
-    A1 -->|"2. Sanitized Cleartext Request"| Downstream
-    Downstream -->|"3. Raw Database / API Result"| M
-    A2 -->|"4. Protected Result with Surrogate Tokens"| Client
+    subgraph Gateway["🛡️ KryptonMCP Zero-Trust Gateway"]
+        subgraph SecurityEngine["🔒 Security & Privacy Core"]
+            G1["1. Prompt-Injection Guardrails & RBAC"]
+            G2["2. In-Flight Inbound Detokenizer"]
+            G3["3. Ephemeral AES-256-GCM Token Vault"]
+            G4["4. In-Flight Outbound PII Masker (Luhn / Mod 10)"]
+            G5["5. RFC 6962 Merkle Tree Audit Signer (Ed25519)"]
+            G2 <--> G3
+            G4 <--> G3
+        end
+
+        subgraph Probes["🩺 Observability & Diagnostics"]
+            H["Health & Ready Probes (/health, /ready, /live)"]
+            D["Diagnostic Logs (stderr)"]
+        end
+    end
+
+    subgraph Targets["🗄️ Downstream Execution Modes"]
+        TargetA["1. Local Subprocess (stdio)<br/><code>npx / uvx / python server</code>"]
+        TargetB["2. Remote HTTP Service<br/><code>http://api-service:8000/rpc</code>"]
+        TargetC["3. Standalone Native Tools<br/><code>Postgres & Redis JIT Credentials</code>"]
+    end
+
+    subgraph Auditor["📋 Compliance & Verification"]
+        V["CLI Verifier (krypton audit verify)"]
+        L[("Signed audit.jsonl Ledger")]
+    end
+
+    C1 --> T1
+    C2 --> T2
+    C3 --> T2
+
+    T1 --> G1
+    T2 --> G1
+
+    G1 --> G2 --> TargetA
+    G1 --> G2 --> TargetB
+    G1 --> G2 --> TargetC
+
+    TargetA --> G4
+    TargetB --> G4
+    TargetC --> G4
+
+    G4 --> G5 --> T1
+    G4 --> G5 --> T2
+
+    G5 -.-> L
+    L -.-> V
 ```
 
 ### 1. 🎭 In-Flight Deterministic PII Masking
