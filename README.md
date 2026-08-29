@@ -48,17 +48,17 @@ Connecting AI models (like Claude, Cursor, Windsurf, LangChain, AutoGen) directl
 
 ```mermaid
 flowchart TD
-    Client["🤖 AI Client (Claude / Cursor / Windsurf)"]
+    Client["🤖 AI Client (Claude / Cursor / Windsurf / LangChain)"]
 
     subgraph InboundPipeline["🔒 Inbound Security Pipeline"]
         G["1. Prompt-Injection Guardrails & RBAC"]
         D["2. Inbound Detokenization Engine"]
         B["3. JIT Ephemeral Credential Broker"]
-        A1["4. Merkle Audit Signer"]
+        A1["4. Merkle Audit Signer (Ed25519)"]
         G --> D --> B --> A1
     end
 
-    Downstream[("🗄️ Downstream MCP Server / DB (Postgres, Redis, APIs)")]
+    Downstream[("🗄️ Downstream Services (Postgres, Redis, Remote APIs)")]
 
     subgraph OutboundPipeline["🎭 Outbound Privacy Pipeline"]
         M["5. In-Flight PII Masker (AES-256-GCM Vault)"]
@@ -66,10 +66,10 @@ flowchart TD
         M --> A2
     end
 
-    Client -->|"1. JSON-RPC Tool Request"| G
+    Client -->|"1. JSON-RPC Tool Request (stdio / SSE)"| G
     A1 -->|"2. Sanitized Cleartext Request"| Downstream
     Downstream -->|"3. Raw Database / API Result"| M
-    A2 -->|"4. Protected Result with Surrogate Tokens"| Client
+    A2 -->|"4. Protected Result with Surrogate Tokens ([EMAIL_REF_...])"| Client
 ```
 
 ### 1. 🎭 In-Flight Deterministic PII Masking

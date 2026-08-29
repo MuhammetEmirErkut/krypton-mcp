@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 )
 
@@ -144,6 +145,9 @@ func (fw *FramingWriter) WriteRaw(data []byte) error {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 {
 		return nil
+	}
+	if len(trimmed) > math.MaxInt-1 {
+		return errors.New("mcp framing: message size exceeds maximum allowed allocation size")
 	}
 
 	buf := make([]byte, 0, len(trimmed)+1)
