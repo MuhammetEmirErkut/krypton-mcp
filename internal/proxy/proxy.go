@@ -44,8 +44,7 @@ type GatewayProxy struct {
 	policyEngine      *guardrails.PolicyEngine
 	auditWriter       *audit.LogWriter
 
-	mu     sync.Mutex
-	closed bool
+	mu sync.Mutex
 }
 
 // GatewayStreams encapsulates the IO streams for both client and downstream

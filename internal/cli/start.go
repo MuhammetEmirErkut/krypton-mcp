@@ -115,7 +115,11 @@ enforces guardrails, and signs audit logs.`,
 					disp.BindStandardHandlers("krypton-gateway", "0.1.0-dev")
 
 					broker := credentials.NewBroker()
-					defer broker.Shutdown(ctx)
+					defer func() {
+						if err := broker.Shutdown(ctx); err != nil {
+							fmt.Fprintf(os.Stderr, "[krypton] Warning: broker shutdown failed: %v\n", err)
+						}
+					}()
 					credentials.BindCredentialTools(disp, broker)
 
 					handler = func(ctx context.Context, req *mcp.RawMessage) (*mcp.Response, error) {
@@ -144,7 +148,9 @@ enforces guardrails, and signs audit logs.`,
 				w, err := audit.NewFileWriter(cfg.Audit.LogPath)
 				if err == nil {
 					auditWriter = w
-					defer w.Close()
+					defer func() {
+						_ = w.Close()
+					}()
 				}
 			}
 
@@ -157,7 +163,11 @@ enforces guardrails, and signs audit logs.`,
 			}
 
 			broker := credentials.NewBroker()
-			defer broker.Shutdown(ctx)
+			defer func() {
+				if err := broker.Shutdown(ctx); err != nil {
+					fmt.Fprintf(os.Stderr, "[krypton] Warning: broker shutdown failed: %v\n", err)
+				}
+			}()
 			credentials.BindCredentialTools(disp, broker)
 
 			// Guardrails Middleware

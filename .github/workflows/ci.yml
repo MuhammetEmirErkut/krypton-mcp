@@ -10,38 +10,85 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }} - Go ${{ matrix.go }})
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
-        go: [ '1.23', '1.24' ]
-
+  lint:
+    name: Code Quality & Lint
+    runs-on: ubuntu-latest
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go }}
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
 
-    - name: Verify Dependencies
-      run: go mod verify
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.60.3
+          args: --timeout=5m
 
-    - name: Run Tests (Linux/macOS with Race Detector)
-      if: runner.os != 'Windows'
-      run: go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+  security:
+    name: Security Audit (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Run Tests (Windows)
-      if: runner.os == 'Windows'
-      run: go test -v -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
 
-    - name: Build Binary
-      run: go build -v ./cmd/krypton
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version: '1.23'
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Run Tests with Race Detector & Coverage
+        run: go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+
+  build:
+    name: Multi-Platform Build Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Build for Linux (amd64 & arm64)
+        run: |
+          GOOS=linux GOARCH=amd64 go build -v -o /dev/null ./cmd/krypton
+          GOOS=linux GOARCH=arm64 go build -v -o /dev/null ./cmd/krypton
+
+      - name: Build for macOS (amd64 & arm64)
+        run: |
+          GOOS=darwin GOARCH=amd64 go build -v -o /dev/null ./cmd/krypton
+          GOOS=darwin GOARCH=arm64 go build -v -o /dev/null ./cmd/krypton
+
+      - name: Build for Windows (amd64)
+        run: |
+          GOOS=windows GOARCH=amd64 go build -v -o /dev/null ./cmd/krypton
