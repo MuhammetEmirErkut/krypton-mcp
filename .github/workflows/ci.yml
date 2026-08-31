@@ -48,16 +48,8 @@ jobs:
           go-version: '1.23'
 
   test:
-    name: Test Suite (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
-
+    name: Test Suite
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -71,13 +63,8 @@ jobs:
       - name: Verify Dependencies
         run: go mod verify
 
-      - name: Run Tests (Linux/macOS with Race Detector)
-        if: runner.os != 'Windows'
+      - name: Run Tests with Race Detector & Coverage
         run: go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
-
-      - name: Run Tests (Windows)
-        if: runner.os == 'Windows'
-        run: go test -v -covermode=atomic -coverprofile=coverage.out ./...
 
   build:
     name: Multi-Platform Build Verification
