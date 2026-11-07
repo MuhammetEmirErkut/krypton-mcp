@@ -3,14 +3,19 @@ package mcp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/krypton-mcp/krypton/pkg/metrics"
 )
 
 // MessageHandler is a function that processes an incoming MCP RawMessage and produces a Response
@@ -28,6 +33,9 @@ type SSEServer struct {
 	healthProvider HealthStatusProvider
 	server         *http.Server
 	startTime      time.Time
+	authToken      string
+	allowedOrigins map[string]bool
+	metrics        *metrics.Registry
 
 	mu       sync.RWMutex
 	sessions map[string]chan []byte
@@ -41,7 +49,9 @@ func NewSSEServer(addr string, handler MessageHandler, healthProvider HealthStat
 		healthProvider: healthProvider,
 		startTime:      time.Now(),
 		sessions:       make(map[string]chan []byte),
+		metrics:        metrics.NewRegistry(),
 	}
+	s.metrics.Describe("krypton_http_requests_total", "HTTP requests handled by the gateway")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/sse", s.handleSSE)
@@ -51,10 +61,11 @@ func NewSSEServer(addr string, handler MessageHandler, healthProvider HealthStat
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/live", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	s.server = &http.Server{
 		Addr:              addr,
-		Handler:           s.corsMiddleware(mux),
+		Handler:           s.instrument(s.corsMiddleware(s.authMiddleware(mux))),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -89,11 +100,53 @@ func (s *SSEServer) Close() error {
 	return s.server.Shutdown(ctx)
 }
 
+// SetAuthToken requires "Authorization: Bearer <token>" on every endpoint except the
+// health probes (/health, /live, /ready). An empty token disables authentication.
+func (s *SSEServer) SetAuthToken(token string) { s.authToken = token }
+
+// SetAllowedOrigins enables CORS only for the listed origins ("*" allows any origin).
+// By default no CORS headers are sent, so browsers refuse cross-origin access.
+func (s *SSEServer) SetAllowedOrigins(origins []string) {
+	s.allowedOrigins = make(map[string]bool, len(origins))
+	for _, o := range origins {
+		s.allowedOrigins[o] = true
+	}
+}
+
+// Metrics exposes the server's counter registry so callers can add their own series.
+func (s *SSEServer) Metrics() *metrics.Registry { return s.metrics }
+
+func isProbePath(p string) bool { return p == "/health" || p == "/live" || p == "/ready" }
+
+func (s *SSEServer) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authToken == "" || isProbePath(r.URL.Path) || r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if got == r.Header.Get("Authorization") || subtle.ConstantTimeCompare([]byte(got), []byte(s.authToken)) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *SSEServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Id")
+		origin := r.Header.Get("Origin")
+		if origin != "" && (s.allowedOrigins["*"] || s.allowedOrigins[origin]) {
+			if s.allowedOrigins["*"] {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Add("Vary", "Origin")
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Id")
+		}
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -102,6 +155,44 @@ func (s *SSEServer) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	code int
+}
+
+func (r *statusRecorder) WriteHeader(c int) { r.code = c; r.ResponseWriter.WriteHeader(c) }
+
+// Flush keeps SSE streaming working through the wrapper.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (s *SSEServer) instrument(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		path := r.URL.Path
+		switch path {
+		case "/sse", "/message", "/rpc", "/health", "/live", "/ready", "/metrics":
+		default:
+			path = "other" // bound label cardinality
+		}
+		s.metrics.Inc("krypton_http_requests_total", "path", path, "code", strconv.Itoa(rec.code))
+	})
+}
+
+func (s *SSEServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	_ = s.metrics.Write(w)
+	s.mu.RLock()
+	n := len(s.sessions)
+	s.mu.RUnlock()
+	fmt.Fprintf(w, "# TYPE krypton_sse_sessions gauge\nkrypton_sse_sessions %d\n", n)
+	fmt.Fprintf(w, "# TYPE krypton_uptime_seconds gauge\nkrypton_uptime_seconds %d\n", int(time.Since(s.startTime).Seconds()))
 }
 
 func (s *SSEServer) handleSSE(w http.ResponseWriter, r *http.Request) {

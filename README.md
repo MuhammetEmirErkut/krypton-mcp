@@ -90,6 +90,12 @@ flowchart TD
 - **Built-in Drivers**: Native drivers for **PostgreSQL** (`CREATE ROLE ... VALID UNTIL`, `pg_terminate_backend`, `DROP ROLE`) and **Redis** (`ACL SETUSER`, `CLIENT KILL USER`, `ACL DELUSER`).
 - **Native MCP Tools**: Exposes `krypton_request_credential`, `krypton_revoke_credential`, and `krypton_list_leases`.
 
+### 3b. 🔭 Observability & Hardening
+- **`/metrics`** (Prometheus text format, SSE mode), plus `/health`, `/live`, `/ready` probes (always unauthenticated).
+- **Bearer-token auth** (`server.auth_token`) and an **origin allowlist** (`server.allowed_origins`); CORS is off by default.
+- **Strict lease requests**: SQL privileges and Redis ACL rules are allowlisted, so a caller cannot widen a lease's scope. MySQL driver included.
+- **Fail-closed masking config**: unknown `builtin_rules` names (e.g. typos) are an error, not silently ignored. Opt-in `iban` rule (mod-97 validated).
+
 ### 4. 🔏 Cryptographically Signed Merkle Audit Ledger
 - **RFC 6962 Domain Separation**: Append-only binary Merkle tree logging every request, response, tool call, and credential lease.
 - **Ed25519 Asymmetric Signatures**: Mathematically signs Merkle root checkpoints.
@@ -103,13 +109,10 @@ flowchart TD
 ### Installation
 
 ```bash
-# Option 1: Install with Go (Zero dependencies)
-go install github.com/krypton-mcp/krypton/cmd/krypton@v0.1.0-alpha
-
-# Option 2: Pull the production Docker image
+# Option 1: Pull the production Docker image
 docker pull ghcr.io/muhammetemirerkut/krypton-mcp:latest
 
-# Option 3: Build from source
+# Option 2: Build from source
 git clone https://github.com/MuhammetEmirErkut/krypton-mcp.git
 cd krypton-mcp
 go build -o krypton ./cmd/krypton
@@ -181,6 +184,10 @@ server:
   host: "127.0.0.1"
   port: 8080
   log_level: "info"
+  # SSE only: require "Authorization: Bearer <token>" (or set KRYPTON_SERVER_AUTH_TOKEN)
+  # auth_token: ""
+  # SSE only: CORS is disabled unless origins are listed
+  # allowed_origins: ["http://localhost:3000"]
 
 downstream:
   transport: "stdio" # "stdio" or "http"

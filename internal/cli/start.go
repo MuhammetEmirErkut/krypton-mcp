@@ -128,6 +128,11 @@ enforces guardrails, and signs audit logs.`,
 				}
 
 				sseServer := mcp.NewSSEServer(addr, handler, healthProvider)
+				sseServer.SetAuthToken(cfg.Server.AuthToken)
+				sseServer.SetAllowedOrigins(cfg.Server.AllowedOrigins)
+				if cfg.Server.AuthToken == "" && cfg.Server.Host != "127.0.0.1" && cfg.Server.Host != "localhost" {
+					fmt.Fprintf(os.Stderr, "[krypton] WARNING: listening on %s without server.auth_token; anyone who can reach this port can call tools\n", cfg.Server.Host)
+				}
 				return sseServer.Start(ctx)
 			}
 

@@ -132,3 +132,50 @@ func TestSSEServer_SSEStreamingFlow(t *testing.T) {
 	delete(server.sessions, sessionID)
 	server.mu.Unlock()
 }
+
+func TestSSEAuthAndCORS(t *testing.T) {
+	h := func(ctx context.Context, req *RawMessage) (*Response, error) { return nil, nil }
+	s := NewSSEServer("127.0.0.1:0", h, nil)
+	s.SetAuthToken("sekret")
+	s.SetAllowedOrigins([]string{"https://ok.example"})
+	ts := httptest.NewServer(s.server.Handler)
+	defer ts.Close()
+
+	do := func(path, auth, origin string) *http.Response {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+
+	if c := do("/metrics", "", "").StatusCode; c != http.StatusUnauthorized {
+		t.Fatalf("no token: got %d", c)
+	}
+	if c := do("/metrics", "Bearer wrong", "").StatusCode; c != http.StatusUnauthorized {
+		t.Fatalf("wrong token: got %d", c)
+	}
+	if c := do("/metrics", "Bearer sekret", "").StatusCode; c != http.StatusOK {
+		t.Fatalf("good token: got %d", c)
+	}
+	if c := do("/health", "", "").StatusCode; c != http.StatusOK {
+		t.Fatalf("health must stay open: got %d", c)
+	}
+	if v := do("/health", "", "https://evil.example").Header.Get("Access-Control-Allow-Origin"); v != "" {
+		t.Fatalf("unexpected CORS for disallowed origin: %q", v)
+	}
+	if v := do("/health", "", "https://ok.example").Header.Get("Access-Control-Allow-Origin"); v != "https://ok.example" {
+		t.Fatalf("expected CORS for allowed origin, got %q", v)
+	}
+	if s.Metrics().Value("krypton_http_requests_total", "path", "/metrics", "code", "401") != 2 {
+		t.Fatal("expected two 401s counted")
+	}
+}

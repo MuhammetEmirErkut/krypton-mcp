@@ -43,6 +43,11 @@ type ServerConfig struct {
 	Host      string `yaml:"host" json:"host"`
 	Port      int    `yaml:"port" json:"port"`
 	LogLevel  string `yaml:"log_level" json:"log_level"`
+	// AuthToken, when set, requires "Authorization: Bearer <token>" on SSE/HTTP endpoints
+	// (health probes stay open). Prefer the KRYPTON_SERVER_AUTH_TOKEN env var over the file.
+	AuthToken string `yaml:"auth_token,omitempty" json:"-"`
+	// AllowedOrigins lists browser origins permitted via CORS. Empty means CORS is disabled.
+	AllowedOrigins []string `yaml:"allowed_origins,omitempty" json:"allowed_origins,omitempty"`
 }
 
 // DownstreamConfig defines the target MCP sub-process or remote HTTP/SSE service to proxy
@@ -229,6 +234,9 @@ func (c *Config) applyEnvOverrides() {
 	if val := os.Getenv("KRYPTON_SECURITY_AUDIT_ENABLED"); val != "" {
 		c.Security.AuditEnabled = parseBoolSafe(val, c.Security.AuditEnabled)
 	}
+	if val := os.Getenv("KRYPTON_SERVER_AUTH_TOKEN"); val != "" {
+		c.Server.AuthToken = val
+	}
 	if val := os.Getenv("KRYPTON_AUDIT_LOG_PATH"); val != "" {
 		c.Audit.LogPath = val
 	}
@@ -329,6 +337,10 @@ server:
   port: 8080
   # Log level: "debug", "info", "warn", "error"
   log_level: "info"
+  # SSE only. Require "Authorization: Bearer <token>" (or set KRYPTON_SERVER_AUTH_TOKEN).
+  # auth_token: ""
+  # SSE only. Browser origins allowed via CORS; CORS is disabled when empty.
+  # allowed_origins: ["http://localhost:3000"]
 
 downstream:
   # Downstream MCP transport: "stdio" (sub-process) or "http" (remote network service)
