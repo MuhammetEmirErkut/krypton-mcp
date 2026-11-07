@@ -18,6 +18,7 @@ const (
 	RuleJWT        RuleType = "jwt"
 	RulePhone      RuleType = "phone"
 	RuleIPAddress  RuleType = "ip_address"
+	RuleIBAN       RuleType = "iban"
 	RuleCustom     RuleType = "custom"
 )
 
@@ -59,7 +60,13 @@ var (
 	regexOpenAIKey    = regexp.MustCompile(`\bsk-[a-zA-Z0-9_-]{20,}\b`)
 	regexAnthropicKey = regexp.MustCompile(`\bsk-ant-[a-zA-Z0-9_-]{20,}\b`)
 	regexGitHubPAT    = regexp.MustCompile(`\b(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{82})\b`)
+	regexStripeKey    = regexp.MustCompile(`\b[sr]k_(?:live|test)_[a-zA-Z0-9]{16,}\b`)
+	regexSlackToken   = regexp.MustCompile(`\bxox[abprs]-[a-zA-Z0-9-]{10,}\b`)
+	regexGoogleAPIKey = regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`)
 	regexPrivateKey   = regexp.MustCompile(`(?s)-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----`)
+
+	// IBAN: 2 letters, 2 check digits, 11-30 alphanumerics, optionally grouped in blocks of 4
+	regexIBAN = regexp.MustCompile(`\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b`)
 
 	// JSON Web Token (JWT) pattern
 	regexJWT = regexp.MustCompile(`\beyJ[a-zA-Z0-9-_=]+\.eyJ[a-zA-Z0-9-_=]+\.[a-zA-Z0-9-_=]*\b`)
@@ -148,4 +155,24 @@ func ValidateSSN(val string) bool {
 func ValidateJWT(val string) bool {
 	parts := strings.Split(val, ".")
 	return len(parts) == 3 && len(parts[0]) > 4 && len(parts[1]) > 4
+}
+
+// ValidateIBAN verifies the ISO 13616 mod-97 checksum
+func ValidateIBAN(val string) bool {
+	s := strings.ReplaceAll(val, " ", "")
+	if len(s) < 15 || len(s) > 34 {
+		return false
+	}
+	rem := 0
+	for _, r := range s[4:] + s[:4] {
+		switch {
+		case r >= '0' && r <= '9':
+			rem = (rem*10 + int(r-'0')) % 97
+		case r >= 'A' && r <= 'Z':
+			rem = (rem*100 + int(r-'A') + 10) % 97
+		default:
+			return false
+		}
+	}
+	return rem == 1
 }

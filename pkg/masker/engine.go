@@ -67,8 +67,18 @@ func NewRuleEngine(cfg *config.MaskingConfig) (*RuleEngine, error) {
 				CompiledRule{Name: "openai_key", Type: RuleAPIKey, Pattern: regexOpenAIKey},
 				CompiledRule{Name: "anthropic_key", Type: RuleAPIKey, Pattern: regexAnthropicKey},
 				CompiledRule{Name: "github_pat", Type: RuleAPIKey, Pattern: regexGitHubPAT},
+				CompiledRule{Name: "stripe_key", Type: RuleAPIKey, Pattern: regexStripeKey},
+				CompiledRule{Name: "slack_token", Type: RuleAPIKey, Pattern: regexSlackToken},
+				CompiledRule{Name: "google_api_key", Type: RuleAPIKey, Pattern: regexGoogleAPIKey},
 				CompiledRule{Name: "private_key", Type: RuleAPIKey, Pattern: regexPrivateKey},
 			)
+		case string(RuleIBAN):
+			engine.rules = append(engine.rules, CompiledRule{
+				Name:      "iban",
+				Type:      RuleIBAN,
+				Pattern:   regexIBAN,
+				Validator: ValidateIBAN,
+			})
 		case string(RuleJWT):
 			engine.rules = append(engine.rules, CompiledRule{
 				Name:      "jwt",
@@ -87,6 +97,9 @@ func NewRuleEngine(cfg *config.MaskingConfig) (*RuleEngine, error) {
 				CompiledRule{Name: "ipv4", Type: RuleIPAddress, Pattern: regexIPv4},
 				CompiledRule{Name: "ipv6", Type: RuleIPAddress, Pattern: regexIPv6},
 			)
+		default:
+			// A typo here would otherwise silently disable masking for that data class.
+			return nil, fmt.Errorf("unknown builtin masking rule '%s'", ruleName)
 		}
 	}
 
