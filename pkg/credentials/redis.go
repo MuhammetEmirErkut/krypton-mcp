@@ -3,7 +3,6 @@ package credentials
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 )
@@ -85,10 +84,18 @@ func (d *RedisDriver) Generate(ctx context.Context, req LeaseRequest) (*Lease, e
 		keyPattern = kp
 	}
 
+	if err := validateRedisKeyPattern(keyPattern); err != nil {
+		return nil, err
+	}
+
 	// Default to read-only permissions if not specified
 	perms := req.Permissions
 	if len(perms) == 0 {
 		perms = []string{"+@read", "-@write", "-@admin", "-@dangerous"}
+	}
+	perms, err = validateRedisACLRules(perms)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build ACL SETUSER arguments: username on >password ~keypattern perms...
@@ -99,7 +106,7 @@ func (d *RedisDriver) Generate(ctx context.Context, req LeaseRequest) (*Lease, e
 		"~" + keyPattern,
 	}
 	for _, p := range perms {
-		args = append(args, strings.TrimSpace(p))
+		args = append(args, p)
 	}
 
 	if err := d.executor.Do(ctx, "ACL", append([]any{"SETUSER"}, args...)...); err != nil {

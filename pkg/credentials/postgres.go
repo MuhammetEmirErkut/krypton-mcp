@@ -3,7 +3,6 @@ package credentials
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 )
@@ -83,6 +82,16 @@ func (d *PostgresDriver) Generate(ctx context.Context, req LeaseRequest) (*Lease
 		return nil, fmt.Errorf("failed to generate secure db password: %w", err)
 	}
 
+	// Validate requested privileges before touching the database (defaults to read-only).
+	perms := req.Permissions
+	if len(perms) == 0 {
+		perms = []string{"SELECT"}
+	}
+	cleanPerms, err := normalizeSQLPrivileges(perms)
+	if err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	expiresAt := now.Add(req.TTL)
 	validUntilStr := expiresAt.Format("2006-01-02 15:04:05-07")
@@ -94,16 +103,15 @@ func (d *PostgresDriver) Generate(ctx context.Context, req LeaseRequest) (*Lease
 		return nil, fmt.Errorf("failed to create postgres role '%s': %w", username, err)
 	}
 
-	// 2. Apply requested permissions (defaulting to read-only on public schema)
-	perms := req.Permissions
-	if len(perms) == 0 {
-		perms = []string{"SELECT"}
-	}
-
-	for _, perm := range perms {
-		permClean := strings.ToUpper(strings.TrimSpace(perm))
+	// 2. Apply requested permissions on the public schema
+	for _, permClean := range cleanPerms {
 		grantQuery := fmt.Sprintf(`GRANT %s ON ALL TABLES IN SCHEMA public TO "%s";`, permClean, username)
-		_ = d.executor.ExecContext(ctx, grantQuery)
+		if err := d.executor.ExecContext(ctx, grantQuery); err != nil {
+			// Do not leave a half-provisioned role behind.
+			_ = d.executor.ExecContext(ctx, fmt.Sprintf(`DROP OWNED BY "%s" CASCADE;`, username))
+			_ = d.executor.ExecContext(ctx, fmt.Sprintf(`DROP ROLE IF EXISTS "%s";`, username))
+			return nil, fmt.Errorf("failed to grant %s to postgres role '%s': %w", permClean, username, err)
+		}
 	}
 
 	connURI := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
@@ -120,7 +128,7 @@ func (d *PostgresDriver) Generate(ctx context.Context, req LeaseRequest) (*Lease
 		IssuedAt:    now,
 		ExpiresAt:   expiresAt,
 		TTL:         req.TTL,
-		Permissions: perms,
+		Permissions: cleanPerms,
 		Metadata: map[string]string{
 			"host":     d.cfg.Host,
 			"port":     fmt.Sprintf("%d", d.cfg.Port),
