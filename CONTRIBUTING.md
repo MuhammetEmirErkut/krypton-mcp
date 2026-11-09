@@ -3,7 +3,7 @@
 Thank you for your interest in contributing to **KryptonMCP**! As an open-source, enterprise-grade security gateway, we maintain high standards for code quality, security, and Git discipline.
 
 ---
-
+a
 ## 🌳 Branching Strategy (GitFlow)
 
 We follow a structured branching model to protect production stability:
